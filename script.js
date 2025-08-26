@@ -1,5 +1,6 @@
 import { auth, db } from "./firebase.js";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { onAuthStateChanged, signOut } 
+  from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } 
   from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
@@ -8,36 +9,38 @@ const chatBox = document.getElementById("chat");
 const input = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
 const chatContainer = document.getElementById("chatContainer");
-
-// Optional: add a logout button in your HTML
 const logoutBtn = document.getElementById("logoutBtn");
+const authBtn = document.getElementById("authBtn");
 
-// --- 1️⃣ Hide chat container initially to prevent flicker ---
+// --- Initial UI state ---
 chatContainer.style.display = "none";
+logoutBtn.style.display = "none";
 
-// --- 2️⃣ Auth check & redirect ---
 let authChecked = false; // flag to prevent double redirect
 
+// --- Auth check ---
 onAuthStateChanged(auth, user => {
   authChecked = true;
 
   if (!user) {
-    console.log("No user signed in → redirecting to auth.html");
-    window.location.replace("auth.html");
+    console.log("❌ No user signed in");
+    chatContainer.style.display = "none";
+    logoutBtn.style.display = "none";
+    authBtn.style.display = "inline-block";
   } else {
-    console.log("User signed in:", user.email);
-    chatContainer.style.display = "block"; // Show chat only when signed in
+    console.log("✅ Signed in as:", user.email);
+    chatContainer.style.display = "block";
+    logoutBtn.style.display = "inline-block";
+    authBtn.style.display = "none";
     initChat(user);
   }
 });
 
-// --- 3️⃣ Initialize chat ---
+// --- Initialize chat ---
 function initChat(user) {
-
-  // Reference messages collection under defaultServer
   const messagesRef = collection(db, "servers", "defaultServer", "messages");
 
-  // --- Real-time listener ---
+  // Real-time listener
   const q = query(messagesRef, orderBy("timestamp"));
   onSnapshot(q, snapshot => {
     chatBox.innerHTML = "";
@@ -45,13 +48,13 @@ function initChat(user) {
       const msg = doc.data();
       chatBox.innerHTML += `<p><b>${msg.sender}</b>: ${msg.text}</p>`;
     });
-    chatBox.scrollTop = chatBox.scrollHeight; // auto-scroll
+    chatBox.scrollTop = chatBox.scrollHeight;
   }, err => {
     console.error("Error fetching messages:", err);
-    chatBox.innerHTML = "<p style='color:red;'>Error loading messages. Check console.</p>";
+    chatBox.innerHTML = "<p style='color:red;'>⚠️ Error loading messages. Check console.</p>";
   });
 
-  // --- Send message ---
+  // Send message
   sendBtn.onclick = async () => {
     const text = input.value.trim();
     if (!text) return;
@@ -69,24 +72,27 @@ function initChat(user) {
     }
   };
 
-  // --- Logout button ---
-  if (logoutBtn) {
-    logoutBtn.onclick = async () => {
-      try {
-        await signOut(auth);
-        window.location.replace("auth.html");
-      } catch (err) {
-        console.error("Error signing out:", err);
-        alert("❌ Logout failed. Try again.");
-      }
-    };
-  }
+  // Logout button
+  logoutBtn.onclick = async () => {
+    try {
+      await signOut(auth);
+      window.location.replace("auth.html");
+    } catch (err) {
+      console.error("Error signing out:", err);
+      alert("❌ Logout failed. Try again.");
+    }
+  };
 }
 
-// --- 4️⃣ Extra safety: Redirect if auth not checked after short timeout ---
+// --- Sign In/Up button ---
+authBtn.onclick = () => {
+  window.location.href = "auth.html";
+};
+
+// --- Fallback redirect if auth check fails ---
 setTimeout(() => {
   if (!authChecked) {
-    console.warn("Auth check timed out → redirecting to auth.html");
+    console.warn("⚠️ Auth check timeout → forcing redirect");
     window.location.replace("auth.html");
   }
-}, 3000); // 3 seconds timeout
+}, 3000);
