@@ -1,65 +1,205 @@
+/* ----------------------------
+   Global
+---------------------------- */
 body {
-  font-family: Arial, sans-serif;
-  margin: 20px;
-  background: #f2f2f2;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #f5f5f5;
+  color: #333;
 }
 
+h1, h2 {
+  margin: 0 0 10px 0;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* ----------------------------
+   Buttons
+---------------------------- */
+button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background-color: #4A90E2;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+button:hover {
+  background-color: #357ABD;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ----------------------------
+   Topbar
+---------------------------- */
+#topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #4A90E2;
+  color: white;
+  padding: 10px 20px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+#topbar button {
+  margin-left: 10px;
+}
+
+#mePreview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar-small {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid white;
+}
+
+/* ----------------------------
+   Auth Page
+---------------------------- */
 .auth-container {
   max-width: 400px;
-  margin: auto;
-  text-align: center;
+  margin: 80px auto;
+  background-color: white;
+  padding: 30px;
+  border-radius: 12px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.1);
 }
 
 .auth-box {
-  background: white;
-  padding: 20px;
-  margin: 15px 0;
-  border-radius: 10px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  margin-bottom: 30px;
 }
 
 .auth-box input {
-  width: 90%;
-  padding: 8px;
-  margin: 5px 0;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  font-size: 14px;
 }
 
-.auth-box button {
-  padding: 8px 20px;
+.auth-box p {
   margin-top: 5px;
+  font-size: 13px;
 }
 
-.message {
-  margin-top: 5px;
-  font-size: 0.9em;
+/* ----------------------------
+   Chat Page
+---------------------------- */
+.chat-container {
+  max-width: 900px;
+  margin: 20px auto;
+  padding: 20px;
+  background-color: white;
+  border-radius: 12px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.05);
 }
 
 .chat-box {
-  background: white;
-  border-radius: 10px;
-  height: 300px;
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 8px;
   padding: 10px;
-  overflow-y: scroll;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  background-color: #f9f9f9;
+}
+
+#composer {
+  display: flex;
+  gap: 8px;
 }
 
 #msgInput {
-  padding: 8px;
-  width: 70%;
+  flex: 1;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
 }
 
-#sendBtn {
-  padding: 8px 15px;
+/* Chat messages */
+.chat-box p {
+  margin: 5px 0;
+  line-height: 1.4;
 }
 
-/* avatars */
-.avatar { width:40px; height:40px; border-radius:50%; margin-right:10px; cursor:pointer; }
-.avatar-small { width:28px; height:28px; border-radius:50%; margin-right:8px; }
-.profile-avatar { width:160px; height:160px; border-radius:50%; display:block; margin: 0 auto 10px; }
-.message-row { display:flex; align-items:flex-start; gap:10px; margin-bottom:8px; }
-.message-content { max-width:80%; }
-.message-meta { display:flex; gap:8px; align-items:center; }
-.sender-name { font-weight:600; cursor:pointer; }
-.small { color:#666; font-size:0.85em; }
-#topbar { display:flex; gap:8px; align-items:center; padding:10px; background:#fff; border-bottom:1px solid #eee; }
-#composer { display:flex; gap:8px; margin-top:8px; }
+/* ----------------------------
+   Profile Page
+---------------------------- */
+.profile-container {
+  max-width: 500px;
+  margin: 40px auto;
+  padding: 20px;
+}
+
+.profile-card {
+  background-color: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+  text-align: center;
+}
+
+.profile-avatar {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-bottom: 12px;
+  border: 2px solid #4A90E2;
+}
+
+.profile-actions button {
+  margin: 5px;
+}
+
+.edit-area {
+  margin-top: 20px;
+  text-align: left;
+}
+
+.edit-area textarea {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  resize: vertical;
+  min-height: 60px;
+  margin-bottom: 10px;
+}
+
+.edit-area input[type="file"] {
+  margin-bottom: 10px;
+}
+
+/* Bio text */
+.bio {
+  font-style: italic;
+  color: #555;
+  margin-bottom: 15px;
+}
+
+/* Small text */
+.small {
+  font-size: 12px;
+  color: #888;
+}

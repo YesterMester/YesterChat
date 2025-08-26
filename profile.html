@@ -1,29 +1,42 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>User Profile</title>
+  <meta charset="UTF-8">
+  <title>User Profile - Yester Chat</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="profile-container">
     <div class="profile-card">
-      <img id="profileAvatar" src="" class="profile-avatar" />
-      <h2 id="profileUsername"></h2>
-      <p id="profileEmail" class="small"></p>
+      <!-- Profile Avatar -->
+      <img id="profileAvatar" src="" class="profile-avatar" alt="Profile Photo" />
 
-      <p id="profileBio"></p>
+      <!-- Username & Email -->
+      <h2 id="profileUsername">Username</h2>
+      <p id="profileEmail" class="small">Email</p>
 
-      <div id="profile-actions">
-        <!-- Buttons injected here (Add Friend / Accept / Edit / Unfriend) -->
+      <!-- Bio -->
+      <p id="profileBio" class="bio">Bio goes here...</p>
+
+      <!-- Dynamic actions -->
+      <div id="profile-actions" class="profile-actions">
+        <!-- Buttons injected here by profile.js:
+             - Add Friend
+             - Accept Request
+             - Edit Profile (for self)
+             - Unfriend
+        -->
       </div>
 
-      <!-- Edit fields (only visible to the profile owner) -->
-      <div id="editArea" style="display:none;">
-        <label>Change bio</label>
-        <textarea id="editBio"></textarea>
-        <label>Change photo</label>
+      <!-- Edit Area (only visible for the profile owner) -->
+      <div id="editArea" class="edit-area" style="display:none;">
+        <label for="editBio">Change Bio:</label>
+        <textarea id="editBio" placeholder="Write your bio..."></textarea>
+
+        <label for="photoInput">Change Photo:</label>
         <input id="photoInput" type="file" accept="image/*" />
-        <button id="saveProfileBtn">Save profile</button>
+
+        <button id="saveProfileBtn">Save Profile</button>
       </div>
     </div>
   </div>

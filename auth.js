@@ -28,7 +28,7 @@ const signinPass = document.getElementById("signin-pass");
 const signinBtn = document.getElementById("signin-btn");
 const signinMsg = document.getElementById("signin-msg");
 
-// Helper: check username uniqueness (case-insensitive via usernameLower)
+// --- Helper: Check if username is already taken ---
 async function isUsernameTaken(username) {
   const usernameLower = username.trim().toLowerCase();
   const q = query(collection(db, "users"), where("usernameLower", "==", usernameLower));
@@ -36,7 +36,7 @@ async function isUsernameTaken(username) {
   return !snap.empty;
 }
 
-// SIGNUP
+// --- SIGNUP ---
 signupBtn.addEventListener("click", async () => {
   signupMsg.textContent = "";
   const username = signupUsername.value.trim();
@@ -57,14 +57,14 @@ signupBtn.addEventListener("click", async () => {
       return;
     }
 
-    // create auth user
+    // create Firebase Auth user
     const userCred = await createUserWithEmailAndPassword(auth, email, pass);
     const uid = userCred.user.uid;
 
-    // set displayName on Firebase Auth profile
+    // set displayName on Auth profile
     await updateProfile(auth.currentUser, { displayName: username });
 
-    // create user profile document
+    // create Firestore user profile
     await setDoc(doc(db, "users", uid), {
       username: username,
       usernameLower: username.toLowerCase(),
@@ -79,12 +79,13 @@ signupBtn.addEventListener("click", async () => {
     signupMsg.textContent = "✅ Account created! Redirecting...";
     signupMsg.style.color = "green";
 
-    // clear
+    // clear input fields
     signupUsername.value = "";
     signupEmail.value = "";
     signupPass.value = "";
 
     setTimeout(() => window.location.href = "index.html", 900);
+
   } catch (err) {
     console.error("Signup error", err);
     signupMsg.textContent = "❌ " + err.message;
@@ -93,7 +94,7 @@ signupBtn.addEventListener("click", async () => {
   }
 });
 
-// SIGNIN
+// --- SIGNIN ---
 signinBtn.addEventListener("click", async () => {
   signinMsg.textContent = "";
   const email = signinEmail.value.trim();
@@ -109,8 +110,11 @@ signinBtn.addEventListener("click", async () => {
     await signInWithEmailAndPassword(auth, email, pass);
     signinMsg.textContent = "✅ Logged in! Redirecting...";
     signinMsg.style.color = "green";
+
+    // clear inputs
     signinEmail.value = "";
     signinPass.value = "";
+
     setTimeout(() => window.location.href = "index.html", 500);
   } catch (err) {
     console.error("Signin error", err);

@@ -1,197 +1,155 @@
 // profile.js
-import { auth, db, storage } from "./firebase.js";
-import { onAuthStateChanged, updateProfile as updateAuthProfile } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { auth, db } from "./firebase.js";
+import { uploadToCloudinary } from "./cloudinary.js";
 import {
-  doc, getDoc, updateDoc, setDoc, arrayUnion, arrayRemove
+  doc,
+  getDoc,
+  updateDoc,
+  arrayUnion,
+  arrayRemove
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 
 // Elements
 const profileAvatar = document.getElementById("profileAvatar");
 const profileUsername = document.getElementById("profileUsername");
 const profileEmail = document.getElementById("profileEmail");
 const profileBio = document.getElementById("profileBio");
+
 const profileActions = document.getElementById("profile-actions");
+
 const editArea = document.getElementById("editArea");
 const editBio = document.getElementById("editBio");
 const photoInput = document.getElementById("photoInput");
 const saveProfileBtn = document.getElementById("saveProfileBtn");
 
-// Helpers
-function getQueryParam(name) {
-  const url = new URL(window.location.href);
-  return url.searchParams.get(name);
-}
+// Get profile UID from query string: ?uid=<uid>
+const urlParams = new URLSearchParams(window.location.search);
+const profileUid = urlParams.get("uid");
 
-// Read target uid from query string, otherwise show self
-const targetUid = getQueryParam("uid");
+// Current logged-in user
+let currentUser = null;
 
-// Wait for auth
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     window.location.replace("auth.html");
     return;
   }
+  currentUser = user;
+  if (!profileUid) {
+    alert("No profile specified.");
+    return;
+  }
+  await loadProfile(profileUid);
+});
 
-  const meUid = user.uid;
-  const viewUid = targetUid || meUid;
+async function loadProfile(uid) {
+  const profileRef = doc(db, "users", uid);
+  const profileSnap = await getDoc(profileRef);
 
-  // fetch both docs
-  const meRef = doc(db, "users", meUid);
-  const targetRef = doc(db, "users", viewUid);
-
-  const meSnap = await getDoc(meRef);
-  const targetSnap = await getDoc(targetRef);
-
-  if (!targetSnap.exists()) {
-    profileUsername.textContent = "Unknown user";
-    profileBio.textContent = "";
+  if (!profileSnap.exists()) {
+    alert("Profile not found.");
     return;
   }
 
-  const meData = meSnap.exists() ? meSnap.data() : null;
-  const targetData = targetSnap.data();
+  const data = profileSnap.data();
 
-  // populate UI
-  profileAvatar.src = targetData.photoURL || defaultAvatar();
-  profileUsername.textContent = targetData.username || "Anonymous";
-  profileEmail.textContent = (viewUid === meUid) ? auth.currentUser.email : ""; // only show email to self
-  profileBio.textContent = targetData.bio || "";
+  // Populate fields
+  profileUsername.textContent = data.username || "Unknown";
+  profileEmail.textContent = data.email || "";
+  profileBio.textContent = data.bio || "";
+  profileAvatar.src = data.photoURL || "default-avatar.png";
 
-  // If viewing your own profile -> show edit area
-  if (viewUid === meUid) {
+  // Show edit area if this is the current user's profile
+  if (currentUser.uid === uid) {
     editArea.style.display = "block";
-    editBio.value = targetData.bio || "";
+    editBio.value = data.bio || "";
+  }
 
-    // Photo upload handler
-    photoInput.addEventListener("change", async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      try {
-        const ref = storageRef(storage, `profilePhotos/${meUid}/${file.name}`);
-        await uploadBytes(ref, file);
-        const url = await getDownloadURL(ref);
-        await updateDoc(targetRef, { photoURL: url });
-        // update auth profile photo URL too
-        await updateAuthProfile(auth.currentUser, { photoURL: url });
-        profileAvatar.src = url;
-        alert("Profile photo updated.");
-      } catch (err) {
-        console.error("Upload error", err);
-        alert("Failed to upload photo.");
-      }
-    });
+  // Setup actions
+  setupProfileActions(uid, data);
+}
 
-    saveProfileBtn.addEventListener("click", async () => {
-      const newBio = editBio.value.trim();
-      try {
-        await updateDoc(targetRef, { bio: newBio });
-        profileBio.textContent = newBio;
-        alert("Profile saved.");
-      } catch (err) {
-        console.error("Save profile error", err);
-        alert("Failed to save profile.");
-      }
-    });
+// --- Profile actions (Add Friend / Accept / Unfriend) ---
+async function setupProfileActions(uid, profileData) {
+  profileActions.innerHTML = "";
+
+  // Cannot friend yourself
+  if (currentUser.uid === uid) return;
+
+  const currentRef = doc(db, "users", currentUser.uid);
+
+  // Determine friendship status
+  const isFriend = (profileData.friends || []).includes(currentUser.uid);
+  const incoming = (profileData.incomingRequests || []).includes(currentUser.uid);
+  const outgoing = (profileData.outgoingRequests || []).includes(currentUser.uid);
+
+  if (isFriend) {
+    const unfriendBtn = document.createElement("button");
+    unfriendBtn.textContent = "Unfriend";
+    unfriendBtn.onclick = async () => {
+      await updateDoc(currentRef, { friends: arrayRemove(uid) });
+      await updateDoc(doc(db, "users", uid), { friends: arrayRemove(currentUser.uid) });
+      alert("Unfriended!");
+      setupProfileActions(uid, profileData);
+    };
+    profileActions.appendChild(unfriendBtn);
+  } else if (incoming) {
+    const acceptBtn = document.createElement("button");
+    acceptBtn.textContent = "Accept Friend Request";
+    acceptBtn.onclick = async () => {
+      await updateDoc(currentRef, { friends: arrayUnion(uid), incomingRequests: arrayRemove(uid) });
+      await updateDoc(doc(db, "users", uid), { friends: arrayUnion(currentUser.uid), outgoingRequests: arrayRemove(currentUser.uid) });
+      alert("Friend request accepted!");
+      setupProfileActions(uid, profileData);
+    };
+    profileActions.appendChild(acceptBtn);
+  } else if (outgoing) {
+    const cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "Cancel Friend Request";
+    cancelBtn.onclick = async () => {
+      await updateDoc(currentRef, { outgoingRequests: arrayRemove(uid) });
+      await updateDoc(doc(db, "users", uid), { incomingRequests: arrayRemove(currentUser.uid) });
+      alert("Friend request canceled!");
+      setupProfileActions(uid, profileData);
+    };
+    profileActions.appendChild(cancelBtn);
   } else {
-    // Viewing someone else's profile -> show friend-state action buttons
-    editArea.style.display = "none";
-    profileActions.innerHTML = ""; // reset
+    const addBtn = document.createElement("button");
+    addBtn.textContent = "Add Friend";
+    addBtn.onclick = async () => {
+      await updateDoc(currentRef, { outgoingRequests: arrayUnion(uid) });
+      await updateDoc(doc(db, "users", uid), { incomingRequests: arrayUnion(currentUser.uid) });
+      alert("Friend request sent!");
+      setupProfileActions(uid, profileData);
+    };
+    profileActions.appendChild(addBtn);
+  }
+}
 
-    // Determine relationship
-    const friends = meData?.friends || [];
-    const incoming = meData?.incomingRequests || [];
-    const outgoing = meData?.outgoingRequests || [];
+// --- Save profile edits (bio + photo) ---
+saveProfileBtn.onclick = async () => {
+  const bio = editBio.value.trim();
+  let photoURL = profileAvatar.src;
 
-    const isFriend = friends.includes(viewUid);
-    const sentRequest = outgoing.includes(viewUid);
-    const receivedRequest = incoming.includes(viewUid);
-
-    if (isFriend) {
-      const btn = document.createElement("button");
-      btn.textContent = "Unfriend";
-      btn.onclick = async () => {
-        try {
-          await updateDoc(meRef, { friends: arrayRemove(viewUid) });
-          await updateDoc(targetRef, { friends: arrayRemove(meUid) });
-          alert("Unfriended.");
-          location.reload();
-        } catch (err) {
-          console.error("Unfriend error", err);
-          alert("Failed to unfriend.");
-        }
-      };
-      profileActions.appendChild(btn);
-    } else if (receivedRequest) {
-      const acceptBtn = document.createElement("button");
-      acceptBtn.textContent = "Accept Friend";
-      acceptBtn.onclick = async () => {
-        try {
-          await updateDoc(meRef, {
-            friends: arrayUnion(viewUid),
-            incomingRequests: arrayRemove(viewUid)
-          });
-          await updateDoc(targetRef, {
-            friends: arrayUnion(meUid),
-            outgoingRequests: arrayRemove(meUid)
-          });
-          alert("Friend request accepted.");
-          location.reload();
-        } catch (err) {
-          console.error("Accept error", err);
-          alert("Failed to accept.");
-        }
-      };
-      const declineBtn = document.createElement("button");
-      declineBtn.textContent = "Decline";
-      declineBtn.onclick = async () => {
-        try {
-          await updateDoc(meRef, { incomingRequests: arrayRemove(viewUid) });
-          await updateDoc(targetRef, { outgoingRequests: arrayRemove(meUid) });
-          alert("Declined.");
-          location.reload();
-        } catch (err) {
-          console.error("Decline error", err);
-          alert("Failed to decline.");
-        }
-      };
-      profileActions.appendChild(acceptBtn);
-      profileActions.appendChild(declineBtn);
-    } else if (sentRequest) {
-      const cancelBtn = document.createElement("button");
-      cancelBtn.textContent = "Cancel Request";
-      cancelBtn.onclick = async () => {
-        try {
-          await updateDoc(meRef, { outgoingRequests: arrayRemove(viewUid) });
-          await updateDoc(targetRef, { incomingRequests: arrayRemove(meUid) });
-          alert("Request cancelled.");
-          location.reload();
-        } catch (err) {
-          console.error("Cancel error", err);
-          alert("Failed to cancel.");
-        }
-      };
-      profileActions.appendChild(cancelBtn);
-    } else {
-      const addBtn = document.createElement("button");
-      addBtn.textContent = "Add Friend";
-      addBtn.onclick = async () => {
-        try {
-          await updateDoc(meRef, { outgoingRequests: arrayUnion(viewUid) });
-          await updateDoc(targetRef, { incomingRequests: arrayUnion(meUid) });
-          alert("Friend request sent.");
-          location.reload();
-        } catch (err) {
-          console.error("Send request error", err);
-          alert("Failed to send request.");
-        }
-      };
-      profileActions.appendChild(addBtn);
+  if (photoInput.files.length > 0) {
+    try {
+      const file = photoInput.files[0];
+      photoURL = await uploadToCloudinary(file);
+    } catch (err) {
+      console.error("Photo upload failed", err);
+      alert("❌ Failed to upload photo.");
+      return;
     }
   }
-});
 
-// fallback avatar
-function defaultAvatar() {
-  return "https://www.gravatar.com/avatar/?d=mp&s=160";
-}
+  try {
+    await updateDoc(doc(db, "users", currentUser.uid), { bio, photoURL });
+    profileBio.textContent = bio;
+    profileAvatar.src = photoURL;
+    alert("✅ Profile updated!");
+  } catch (err) {
+    console.error("Profile update failed", err);
+    alert("❌ Failed to save profile.");
+  }
+};

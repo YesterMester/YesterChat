@@ -1,29 +1,31 @@
-<!-- auth.html (signup portion) -->
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Yester Chat - Login / Signup</title>
+  <meta charset="UTF-8">
+  <title>Yester Chat - Auth</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="auth-container">
     <h1>Yester Chat</h1>
 
+    <!-- SIGNUP FORM -->
     <div class="auth-box">
-      <h2>Create Account</h2>
-      <input id="signup-username" placeholder="Username (unique)" type="text" />
-      <input id="signup-email" placeholder="Email" type="email">
-      <input id="signup-pass" placeholder="Password" type="password">
+      <h2>Sign Up</h2>
+      <input type="text" id="signup-username" placeholder="Username" required>
+      <input type="email" id="signup-email" placeholder="Email" required>
+      <input type="password" id="signup-pass" placeholder="Password" required>
       <button id="signup-btn">Sign Up</button>
-      <p id="signup-msg" class="message"></p>
+      <p id="signup-msg"></p>
     </div>
 
+    <!-- SIGNIN FORM -->
     <div class="auth-box">
-      <h2>Login</h2>
-      <input id="signin-email" placeholder="Email" type="email">
-      <input id="signin-pass" placeholder="Password" type="password">
+      <h2>Sign In</h2>
+      <input type="email" id="signin-email" placeholder="Email" required>
+      <input type="password" id="signin-pass" placeholder="Password" required>
       <button id="signin-btn">Sign In</button>
-      <p id="signin-msg" class="message"></p>
+      <p id="signin-msg"></p>
     </div>
   </div>
 
