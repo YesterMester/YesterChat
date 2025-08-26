@@ -4,7 +4,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebas
 import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-analytics.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
-import { getStorage } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
