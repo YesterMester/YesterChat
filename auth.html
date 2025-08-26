@@ -1,20 +1,30 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login / Signup</title>
+  <title>Yester Chat - Login / Signup</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h2>Create Account</h2>
-  <input id="signup-email" placeholder="Email">
-  <input id="signup-pass" type="password" placeholder="Password">
-  <button id="signup-btn">Sign Up</button>
+  <div class="auth-container">
+    <h1>Yester Chat</h1>
 
-  <h2>Login</h2>
-  <input id="signin-email" placeholder="Email">
-  <input id="signin-pass" type="password" placeholder="Password">
-  <button id="signin-btn">Sign In</button>
+    <div class="auth-box">
+      <h2>Create Account</h2>
+      <input id="signup-email" placeholder="Email" type="email">
+      <input id="signup-pass" placeholder="Password" type="password">
+      <button id="signup-btn">Sign Up</button>
+      <p id="signup-msg" class="message"></p>
+    </div>
 
-  <script type="module" src="auth.js"></script>
+    <div class="auth-box">
+      <h2>Login</h2>
+      <input id="signin-email" placeholder="Email" type="email">
+      <input id="signin-pass" placeholder="Password" type="password">
+      <button id="signin-btn">Sign In</button>
+      <p id="signin-msg" class="message"></p>
+    </div>
+  </div>
+
+  <script type="module" src="./auth.js"></script>
 </body>
 </html>

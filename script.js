@@ -6,23 +6,21 @@ import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp }
 const chatBox = document.getElementById("chat");
 const input = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
+const chatContainer = document.getElementById("chatContainer");
 
-// --- Listen for auth state changes only ---
+// --- Auth check ---
 onAuthStateChanged(auth, user => {
   if (!user) {
-    // Not logged in → redirect to auth page
     window.location.replace("auth.html");
   } else {
-    // Logged in → initialize chat
+    chatContainer.style.display = "block"; // Show chat only if signed in
     initChat(user);
   }
 });
 
-// --- Function to initialize chat ---
 function initChat(user) {
   console.log("Logged in as:", user.email);
 
-  // Listen to messages in real-time
   const q = query(
     collection(db, "servers", "defaultServer", "channels", "general", "messages"),
     orderBy("timestamp")
@@ -34,10 +32,9 @@ function initChat(user) {
       const msg = doc.data();
       chatBox.innerHTML += `<p><b>${msg.sender}</b>: ${msg.text}</p>`;
     });
-    chatBox.scrollTop = chatBox.scrollHeight; // auto-scroll to bottom
+    chatBox.scrollTop = chatBox.scrollHeight;
   });
 
-  // Send message
   sendBtn.onclick = async () => {
     const text = input.value.trim();
     if (!text) return;
@@ -45,7 +42,7 @@ function initChat(user) {
     await addDoc(
       collection(db, "servers", "defaultServer", "channels", "general", "messages"),
       {
-        text: text,
+        text,
         sender: user.email,
         timestamp: serverTimestamp()
       }

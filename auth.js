@@ -1,59 +1,64 @@
-// auth.js
-
 import { auth } from "./firebase.js";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } 
   from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 
-// Sign Up
-document.getElementById("signup-btn").addEventListener("click", async () => {
-  const emailField = document.getElementById("signup-email");
-  const passField = document.getElementById("signup-pass");
-  const email = emailField.value.trim();
-  const password = passField.value.trim();
+// --- Elements ---
+const signupEmail = document.getElementById("signup-email");
+const signupPass = document.getElementById("signup-pass");
+const signupBtn = document.getElementById("signup-btn");
+const signupMsg = document.getElementById("signup-msg");
 
-  if (!email || !password) {
-    alert("Please enter both email and password.");
+const signinEmail = document.getElementById("signin-email");
+const signinPass = document.getElementById("signin-pass");
+const signinBtn = document.getElementById("signin-btn");
+const signinMsg = document.getElementById("signin-msg");
+
+// --- Sign Up ---
+signupBtn.addEventListener("click", async () => {
+  const email = signupEmail.value.trim();
+  const pass = signupPass.value.trim();
+
+  if (!email || !pass) {
+    signupMsg.textContent = "Please enter email and password.";
+    signupMsg.style.color = "red";
     return;
   }
 
   try {
-    await createUserWithEmailAndPassword(auth, email, password);
-    alert("✅ Account created successfully!");
-    // Clear input fields
-    emailField.value = "";
-    passField.value = "";
-    // Redirect to chat
-    window.location.href = "index.html";
-  } catch (error) {
-    alert("❌ Error: " + error.message);
-    // Optional: clear password field
-    passField.value = "";
+    await createUserWithEmailAndPassword(auth, email, pass);
+    signupMsg.textContent = "✅ Account created successfully!";
+    signupMsg.style.color = "green";
+    signupEmail.value = "";
+    signupPass.value = "";
+    setTimeout(() => window.location.href = "index.html", 1000);
+  } catch (err) {
+    signupMsg.textContent = "❌ " + err.message;
+    signupMsg.style.color = "red";
+    signupPass.value = "";
   }
 });
 
-// Sign In
-document.getElementById("signin-btn").addEventListener("click", async () => {
-  const emailField = document.getElementById("signin-email");
-  const passField = document.getElementById("signin-pass");
-  const email = emailField.value.trim();
-  const password = passField.value.trim();
+// --- Sign In ---
+signinBtn.addEventListener("click", async () => {
+  const email = signinEmail.value.trim();
+  const pass = signinPass.value.trim();
 
-  if (!email || !password) {
-    alert("Please enter both email and password.");
+  if (!email || !pass) {
+    signinMsg.textContent = "Please enter email and password.";
+    signinMsg.style.color = "red";
     return;
   }
 
   try {
-    await signInWithEmailAndPassword(auth, email, password);
-    alert("✅ Logged in successfully!");
-    // Clear input fields
-    emailField.value = "";
-    passField.value = "";
-    // Redirect to chat
-    window.location.href = "index.html";
-  } catch (error) {
-    alert("❌ Error: " + error.message);
-    // Optional: clear password field
-    passField.value = "";
+    await signInWithEmailAndPassword(auth, email, pass);
+    signinMsg.textContent = "✅ Logged in successfully!";
+    signinMsg.style.color = "green";
+    signinEmail.value = "";
+    signinPass.value = "";
+    setTimeout(() => window.location.href = "index.html", 500);
+  } catch (err) {
+    signinMsg.textContent = "❌ " + err.message;
+    signinMsg.style.color = "red";
+    signinPass.value = "";
   }
 });
