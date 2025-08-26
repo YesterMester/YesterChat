@@ -1,7 +1,7 @@
 import { auth, db } from "./firebase.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } 
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
 const chatBox = document.getElementById("chat");
 const input = document.getElementById("msgInput");
