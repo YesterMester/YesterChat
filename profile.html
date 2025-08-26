@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>User Profile</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="profile-container">
+    <div class="profile-card">
+      <img id="profileAvatar" src="" class="profile-avatar" />
+      <h2 id="profileUsername"></h2>
+      <p id="profileEmail" class="small"></p>
+
+      <p id="profileBio"></p>
+
+      <div id="profile-actions">
+        <!-- Buttons injected here (Add Friend / Accept / Edit / Unfriend) -->
+      </div>
+
+      <!-- Edit fields (only visible to the profile owner) -->
+      <div id="editArea" style="display:none;">
+        <label>Change bio</label>
+        <textarea id="editBio"></textarea>
+        <label>Change photo</label>
+        <input id="photoInput" type="file" accept="image/*" />
+        <button id="saveProfileBtn">Save profile</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="profile.js"></script>
+</body>
+</html>

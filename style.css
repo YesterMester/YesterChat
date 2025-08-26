@@ -51,3 +51,15 @@ body {
 #sendBtn {
   padding: 8px 15px;
 }
+
+/* avatars */
+.avatar { width:40px; height:40px; border-radius:50%; margin-right:10px; cursor:pointer; }
+.avatar-small { width:28px; height:28px; border-radius:50%; margin-right:8px; }
+.profile-avatar { width:160px; height:160px; border-radius:50%; display:block; margin: 0 auto 10px; }
+.message-row { display:flex; align-items:flex-start; gap:10px; margin-bottom:8px; }
+.message-content { max-width:80%; }
+.message-meta { display:flex; gap:8px; align-items:center; }
+.sender-name { font-weight:600; cursor:pointer; }
+.small { color:#666; font-size:0.85em; }
+#topbar { display:flex; gap:8px; align-items:center; padding:10px; background:#fff; border-bottom:1px solid #eee; }
+#composer { display:flex; gap:8px; margin-top:8px; }
