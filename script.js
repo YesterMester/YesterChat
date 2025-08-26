@@ -10,6 +10,7 @@ const input = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
 
 // --- 1️⃣ Immediate redirect if no current user ---
+
 if (!auth.currentUser) {
   window.location.replace("auth.html"); // redirect immediately
 }
