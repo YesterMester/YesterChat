@@ -7,22 +7,18 @@ const chatBox = document.getElementById("chat");
 const input = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
 
-// --- 1️⃣ Immediate redirect if no current user ---
-
-if (!auth.currentUser) {
-  window.location.replace("auth.html"); // redirect immediately
-}
-
-// --- 2️⃣ Listen for auth state changes ---
+// --- Listen for auth state changes only ---
 onAuthStateChanged(auth, user => {
   if (!user) {
-    window.location.replace("auth.html"); // redirect if user logs out or is not logged in
+    // Not logged in → redirect to auth page
+    window.location.replace("auth.html");
   } else {
+    // Logged in → initialize chat
     initChat(user);
   }
 });
 
-// --- 3️⃣ Function to initialize chat ---
+// --- Function to initialize chat ---
 function initChat(user) {
   console.log("Logged in as:", user.email);
 
