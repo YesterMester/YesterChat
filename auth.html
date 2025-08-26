@@ -1,39 +1,20 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login</title>
+  <title>Login / Signup</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h2>Sign Up</h2>
+  <h2>Create Account</h2>
   <input id="signup-email" placeholder="Email">
   <input id="signup-pass" type="password" placeholder="Password">
   <button id="signup-btn">Sign Up</button>
 
-  <h2>Sign In</h2>
+  <h2>Login</h2>
   <input id="signin-email" placeholder="Email">
   <input id="signin-pass" type="password" placeholder="Password">
   <button id="signin-btn">Sign In</button>
 
-  <script type="module">
-    import { auth } from "./firebase.js";
-    import { createUserWithEmailAndPassword, signInWithEmailAndPassword } 
-      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-
-    document.getElementById("signup-btn").onclick = async () => {
-      const email = document.getElementById("signup-email").value;
-      const pass = document.getElementById("signup-pass").value;
-      await createUserWithEmailAndPassword(auth, email, pass);
-      alert("Signed up!");
-      window.location.href = "index.html";
-    };
-
-    document.getElementById("signin-btn").onclick = async () => {
-      const email = document.getElementById("signin-email").value;
-      const pass = document.getElementById("signin-pass").value;
-      await signInWithEmailAndPassword(auth, email, pass);
-      alert("Signed in!");
-      window.location.href = "index.html";
-    };
-  </script>
+  <script type="module" src="auth.js"></script>
 </body>
 </html>
