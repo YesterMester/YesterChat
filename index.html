@@ -6,24 +6,103 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
   <style>
-    /* Minimal inline layout helpers so you can test immediately */
-    body { margin:0; font-family:Inter,system-ui,Arial; background:#f6f8fb; color:#111; }
-    #topbar { display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:#fff; border-bottom:1px solid #eee; }
-    .topbar-left { display:flex; gap:12px; align-items:center; }
-    .topbar-btn { margin-left:8px; padding:8px 10px; border-radius:8px; border:1px solid #ddd; background:#fff; cursor:pointer; }
-    .chat-container { max-width:1024px; margin:20px auto; display:flex; gap:12px; padding:12px; }
-    .friends-container { width:260px; }
-    .friends-container .card, .chat-column .card { background:#fff; padding:12px; border-radius:10px; border:1px solid #eee; box-shadow:0 6px 18px rgba(12,20,40,0.03); }
-    .chat-column { flex:1; display:flex; flex-direction:column; gap:12px; }
-    .chat-box { background:#fff; border-radius:8px; border:1px solid #eee; height:440px; overflow:auto; padding:12px; }
-    .composer { display:flex; gap:8px; padding-top:6px; }
-    #msgInput { flex:1; padding:10px; border-radius:8px; border:1px solid #ddd; }
-    #sendBtn { padding:10px 14px; border-radius:8px; background:#2f6cff; color:#fff; border:none; cursor:pointer; }
-    .avatar-small { width:36px; height:36px; border-radius:50%; object-fit:cover; }
-    .friend-item { display:flex; gap:8px; align-items:center; padding:8px; border-radius:8px; cursor:pointer; }
-    .friend-item:hover { background:#fbfbff; }
-    .small { color:#666; font-size:0.9rem; }
-    .hidden { display:none; }
+    :root{
+      --bg:#f6f8fb;
+      --panel:#ffffff;
+      --muted:#6b7280;
+      --accent:#2f6cff;
+      --accent-600:#2657e6;
+      --topbar-contrast:#0b5fff;
+      --surface-border: #e6e9ef;
+    }
+
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial,Helvetica,sans-serif;background:var(--bg);color:#0f172a;}
+    /* TOPBAR */
+    #topbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:10px 18px;
+      background: linear-gradient(90deg,var(--topbar-contrast), var(--accent));
+      color:#fff;
+      border-bottom:1px solid rgba(0,0,0,0.06);
+      position:sticky;
+      top:0;
+      z-index:40;
+    }
+
+    .topbar-left{display:flex;gap:12px;align-items:center;}
+    #brand{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      color: #fff;
+      text-decoration:none;
+    }
+    #brand .logo {
+      width:40px;height:40px;border-radius:8px;background:rgba(255,255,255,0.12);display:inline-flex;align-items:center;justify-content:center;font-weight:700;
+      color:#fff;font-size:18px;
+    }
+    #brand h1{font-size:18px;margin:0;color:#fff;}
+
+    /* me preview (avatar + name + profile button) */
+    #mePreview{display:flex;align-items:center;gap:10px;}
+    #mePreview img.avatar-small{
+      width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.18);
+      background:rgba(255,255,255,0.03);
+    }
+    #meName{font-weight:600;color:#fff;font-size:15px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;}
+
+    /* topbar buttons — transparent on gradient background */
+    .topbar-btn{
+      -webkit-appearance:none;
+      appearance:none;
+      border:1px solid rgba(255,255,255,0.18);
+      background:transparent;
+      color:#fff;
+      padding:8px 10px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:600;
+      font-size:14px;
+    }
+    .topbar-btn:hover{ background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.28); }
+    .topbar-btn.primary{
+      background:#fff;
+      color:var(--accent-600);
+      border-color: rgba(0,0,0,0.06);
+    }
+    .topbar-btn.primary:hover{ background: #f4f6ff; }
+
+    /* LAYOUT: wrapper under topbar */
+    .app-shell{ max-width:1100px; margin:20px auto; padding:0 14px; display:flex; gap:16px; align-items:flex-start; }
+    .friends-container{ width:260px; flex:0 0 260px; }
+    .card{ background:var(--panel); padding:14px; border-radius:12px; border:1px solid var(--surface-border); box-shadow:0 6px 18px rgba(12,20,40,0.03); }
+
+    .chat-column{ flex:1; display:flex; flex-direction:column; gap:12px; min-width:0; }
+    .chat-box{ background:var(--panel); border-radius:10px; border:1px solid var(--surface-border); height:520px; overflow:auto; padding:12px; }
+    .composer{ display:flex; gap:8px; align-items:center; margin-top:6px; }
+    #msgInput{ flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--surface-border); font-size:15px; }
+    #sendBtn{ padding:10px 14px; border-radius:10px; border:none; background:var(--accent); color:white; cursor:pointer; font-weight:600; }
+
+    .avatar-small{ width:36px;height:36px;border-radius:50%;object-fit:cover; }
+    .friend-item{ display:flex;gap:10px;align-items:center;padding:8px;border-radius:8px;cursor:pointer; }
+    .friend-item:hover{ background:#fbfbff; }
+    .friend-avatar{ width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid #eee; }
+
+    .message-row{ display:flex; gap:10px; align-items:flex-start; margin-bottom:12px; }
+    .message-content .message-meta{ font-size:13px; color:#0f172a; font-weight:700; margin-bottom:6px; }
+    .message-text{ background:#f7f9ff; padding:10px 12px; border-radius:8px; display:inline-block; color:#0f172a; }
+
+    .small{ color:var(--muted); font-size:0.9rem; }
+
+    /* responsive */
+    @media (max-width:900px){
+      .app-shell{ flex-direction:column; padding:12px; }
+      .friends-container{ width:100%; order:2; }
+      .chat-column{ order:1; }
+    }
   </style>
 </head>
 <body>
@@ -31,60 +110,61 @@
   <!-- TOPBAR -->
   <div id="topbar">
     <div class="topbar-left">
-      <div id="mePreview" style="display:none; align-items:center;">
-        <img id="meAvatarSmall" src="" class="avatar-small" alt="Profile" />
-        <span id="meName" style="margin-left:8px; font-weight:600;"></span>
-        <button id="myProfileBtn" class="topbar-btn">My Profile</button>
+      <a id="brand" href="index.html" aria-label="Yester Chat home">
+        <div class="logo">YC</div>
+        <h1>Yester Chat</h1>
+      </a>
+
+      <!-- Current User Preview (hidden until signed in) -->
+      <div id="mePreview" style="display:none;">
+        <img id="meAvatarSmall" src="" class="avatar-small" alt="Your avatar" />
+        <span id="meName">Your name</span>
       </div>
     </div>
 
     <!-- Auth Controls -->
     <div id="authButtons">
       <button id="authBtn" class="topbar-btn">Sign In / Sign Up</button>
+      <button id="myProfileBtn" class="topbar-btn primary" style="display:none;">My Profile</button>
       <button id="logoutBtn" class="topbar-btn" style="display:none;">Logout</button>
     </div>
   </div>
 
-  <!-- LAYOUT: Friends column + Chat column -->
-  <div class="chat-container" id="appShell">
+  <!-- MAIN SHELL -->
+  <div class="app-shell">
 
-    <!-- FRIENDS LIST -->
-    <div id="friendsContainer" class="friends-container hidden">
+    <!-- FRIENDS -->
+    <aside id="friendsContainer" class="friends-container" style="display:none;">
       <div class="card">
         <h3 style="margin:0 0 8px 0">Friends</h3>
-        <ul id="friendsList" style="list-style:none; padding:0; margin:0;"></ul>
-
+        <ul id="friendsList" style="list-style:none;padding:0;margin:0;"></ul>
         <hr style="margin:12px 0" />
         <h4 style="margin:0 0 8px 0">Incoming Requests</h4>
         <div id="friendRequests" class="small">No incoming requests</div>
       </div>
-    </div>
+    </aside>
 
     <!-- CHAT -->
-    <div class="chat-column">
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-          <h2 style="margin:0">Yester Chat</h2>
-          <div id="signedOutNotice" class="small">Not signed in — you will be redirected to the login page shortly.</div>
-        </div>
+    <main class="chat-column" style="width:100%">
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center;">
+        <h2 style="margin:0">Yester Chat</h2>
+        <div id="signedOutNotice" class="small">Not signed in — you will be redirected shortly.</div>
       </div>
 
-      <div id="chatContainer" class="card chat-column-item" style="display:none;">
+      <section id="chatContainer" class="card" style="display:none;">
         <div id="chat" class="chat-box" aria-live="polite"></div>
-
-        <div id="composer" class="composer" style="margin-top:8px;">
-          <input id="msgInput" type="text" placeholder="Type a message..." autocomplete="off" />
+        <div class="composer">
+          <input id="msgInput" type="text" placeholder="Type a message…" autocomplete="off" />
           <button id="sendBtn">Send</button>
         </div>
-      </div>
-    </div>
-
+      </section>
+    </main>
   </div>
 
   <!-- Templates -->
   <template id="chatMessageTemplate">
-    <div class="message-row" style="display:flex; gap:10px; align-items:flex-start; margin-bottom:10px;">
-      <img class="avatar" src="" width="40" height="40" style="border-radius:50%; object-fit:cover" />
+    <div class="message-row">
+      <img class="avatar" src="" width="40" height="40" style="border-radius:50%;object-fit:cover;border:1px solid #eee" />
       <div class="message-content">
         <div class="message-meta"><span class="sender-name"></span> <span class="small time"></span></div>
         <div class="message-text"></div>
