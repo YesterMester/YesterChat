@@ -1,23 +1,10 @@
-// auth.js
 import { auth, db } from "./firebase.js";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  updateProfile
-} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } 
+  from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { doc, setDoc, serverTimestamp } 
+  from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
-import {
-  doc,
-  setDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-  serverTimestamp
-} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
-
-// Elements
-const signupUsername = document.getElementById("signup-username");
+// --- Elements ---
 const signupEmail = document.getElementById("signup-email");
 const signupPass = document.getElementById("signup-pass");
 const signupBtn = document.getElementById("signup-btn");
@@ -28,77 +15,52 @@ const signinPass = document.getElementById("signin-pass");
 const signinBtn = document.getElementById("signin-btn");
 const signinMsg = document.getElementById("signin-msg");
 
-// --- Helper: Check if username is already taken ---
-async function isUsernameTaken(username) {
-  const usernameLower = username.trim().toLowerCase();
-  const q = query(collection(db, "users"), where("usernameLower", "==", usernameLower));
-  const snap = await getDocs(q);
-  return !snap.empty;
-}
-
-// --- SIGNUP ---
+// --- Sign Up ---
 signupBtn.addEventListener("click", async () => {
-  signupMsg.textContent = "";
-  const username = signupUsername.value.trim();
   const email = signupEmail.value.trim();
-  const pass = signupPass.value;
+  const pass = signupPass.value.trim();
 
-  if (!username || !email || !pass) {
-    signupMsg.textContent = "Please fill username, email and password.";
+  if (!email || !pass) {
+    signupMsg.textContent = "Please enter email and password.";
     signupMsg.style.color = "red";
     return;
   }
 
   try {
-    // check username availability
-    if (await isUsernameTaken(username)) {
-      signupMsg.textContent = "Username already taken. Choose another.";
-      signupMsg.style.color = "red";
-      return;
-    }
+    // 1️⃣ Create Firebase Auth user
+    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+    const user = userCredential.user;
 
-    // create Firebase Auth user
-    const userCred = await createUserWithEmailAndPassword(auth, email, pass);
-    const uid = userCred.user.uid;
-
-    // set displayName on Auth profile
-    await updateProfile(auth.currentUser, { displayName: username });
-
-    // create Firestore user profile
-    await setDoc(doc(db, "users", uid), {
-      username: username,
-      usernameLower: username.toLowerCase(),
+    // 2️⃣ Create Firestore user profile document
+    await setDoc(doc(db, "users", user.uid), {
+      username: email.split("@")[0],      // default username
+      usernameLower: email.split("@")[0].toLowerCase(),
       bio: "",
       photoURL: "",
       friends: [],
-      incomingRequests: [],
-      outgoingRequests: [],
-      createdAt: serverTimestamp()
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
     });
 
-    signupMsg.textContent = "✅ Account created! Redirecting...";
+    signupMsg.textContent = "✅ Account created successfully!";
     signupMsg.style.color = "green";
-
-    // clear input fields
-    signupUsername.value = "";
     signupEmail.value = "";
     signupPass.value = "";
 
-    setTimeout(() => window.location.href = "index.html", 900);
+    setTimeout(() => window.location.href = "index.html", 1000);
 
   } catch (err) {
-    console.error("Signup error", err);
     signupMsg.textContent = "❌ " + err.message;
     signupMsg.style.color = "red";
     signupPass.value = "";
+    console.error(err);
   }
 });
 
-// --- SIGNIN ---
+// --- Sign In ---
 signinBtn.addEventListener("click", async () => {
-  signinMsg.textContent = "";
   const email = signinEmail.value.trim();
-  const pass = signinPass.value;
+  const pass = signinPass.value.trim();
 
   if (!email || !pass) {
     signinMsg.textContent = "Please enter email and password.";
@@ -108,18 +70,18 @@ signinBtn.addEventListener("click", async () => {
 
   try {
     await signInWithEmailAndPassword(auth, email, pass);
-    signinMsg.textContent = "✅ Logged in! Redirecting...";
-    signinMsg.style.color = "green";
 
-    // clear inputs
+    signinMsg.textContent = "✅ Logged in successfully!";
+    signinMsg.style.color = "green";
     signinEmail.value = "";
     signinPass.value = "";
 
     setTimeout(() => window.location.href = "index.html", 500);
+
   } catch (err) {
-    console.error("Signin error", err);
     signinMsg.textContent = "❌ " + err.message;
     signinMsg.style.color = "red";
     signinPass.value = "";
+    console.error(err);
   }
 });
