@@ -15,6 +15,7 @@ import {
   getDoc,
   getDocs
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+
 // cloudinary helper only referenced on profile page if needed
 import { uploadProfileImage } from "./cloudinary.js";
 
@@ -39,7 +40,6 @@ const sendBtn = document.getElementById("sendBtn");
 
 const chatMessageTemplate = document.getElementById("chatMessageTemplate");
 const friendItemTemplate = document.getElementById("friendItemTemplate");
-
 /* ===== state & helpers ===== */
 let authChecked = false;
 let unsubscriptions = { chat: null, userDoc: null, requests: null };
@@ -108,7 +108,6 @@ function cleanupRealtime() {
   if (friendsList) friendsList.innerHTML = "";
   if (friendRequestsContainer) friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
 }
-
 /* ===== onAuthStateChanged ===== */
 onAuthStateChanged(auth, async (user) => {
   authChecked = true;
@@ -138,7 +137,6 @@ onAuthStateChanged(auth, async (user) => {
   try {
     await ensureMyUserDoc(user);
 
-    // show topbar elements
     const me = profileCache[user.uid] || await fetchProfile(user.uid);
     if (meAvatarSmall) meAvatarSmall.src = me.photoURL || defaultAvatar();
     if (meName) meName.textContent = me.username || (user.displayName || user.email.split("@")[0]);
@@ -159,13 +157,14 @@ onAuthStateChanged(auth, async (user) => {
     console.error("Post-auth initialization error:", err);
   }
 });
-
 /* ===== auth buttons ===== */
 if (authBtn) authBtn.addEventListener("click", () => window.location.href = "auth.html");
+
 if (myProfileBtn) myProfileBtn.addEventListener("click", () => {
   const uid = auth.currentUser?.uid;
   if (uid) openProfile(uid);
 });
+
 if (logoutBtn) logoutBtn.addEventListener("click", async () => {
   try {
     cleanupRealtime();
@@ -278,7 +277,6 @@ function startChatListener(user) {
     }
   }
 }
-
 /* ===== Incoming friend requests ===== */
 function startIncomingRequestsListener(user) {
   if (!user || !friendRequestsContainer) return;
