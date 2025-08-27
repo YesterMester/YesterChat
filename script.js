@@ -16,11 +16,10 @@ import {
   onSnapshot,
   serverTimestamp,
   getDoc,
-  getDocs,
-  arrayUnion // <-- FIXED: previously missing
+  arrayUnion
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
-// cloudinary helper (profile image uploads)
+// cloudinary helper for profile images
 import { uploadProfileImage } from "./cloudinary.js";
 
 /* ===== DOM Elements ===== */
@@ -50,9 +49,21 @@ let authChecked = false;
 let unsubscriptions = { chat: null, userDoc: null, requests: null };
 const profileCache = {}; // uid -> profile data cache
 
-function defaultAvatar() { return "https://www.gravatar.com/avatar/?d=mp&s=160"; }
-function escapeHtml(s = "") { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-function openProfile(uid) { if (!uid) return; window.location.href = `profile.html?uid=${encodeURIComponent(uid)}`; }
+function defaultAvatar() {
+  return "https://www.gravatar.com/avatar/?d=mp&s=160";
+}
+
+function escapeHtml(s = "") {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function openProfile(uid) {
+  if (!uid) return;
+  window.location.href = `profile.html?uid=${encodeURIComponent(uid)}`;
+}
 
 /* ===== Fetch & cache user profile ===== */
 async function fetchProfile(uid) {
@@ -91,7 +102,6 @@ async function ensureMyUserDoc(user) {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-
       profileCache[user.uid] = {
         username: defaultUsername,
         usernameLower: defaultUsername.toLowerCase(),
@@ -119,7 +129,7 @@ function cleanupRealtime() {
   if (friendRequestsContainer) friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
 }
 
-console.log("Part 1 loaded: imports, DOM references, helpers, and cache ready.");
+console.log("Part 1 loaded: imports, DOM refs, helpers, cache ready.");
 /* ===== onAuthStateChanged ===== */
 onAuthStateChanged(auth, async (user) => {
   authChecked = true;
@@ -184,7 +194,7 @@ if (myProfileBtn) myProfileBtn.addEventListener("click", () => {
 
 if (logoutBtn) logoutBtn.addEventListener("click", async () => {
   try {
-    cleanupRealtime(); // fixed: ensure defined before calling
+    cleanupRealtime(); // ensure defined before calling
     await signOut(auth);
     window.location.replace("auth.html");
   } catch (err) {
@@ -201,8 +211,8 @@ setTimeout(() => {
   }
 }, 10000);
 
-console.log("Part 2 loaded: auth state handling, topbar updates, and logout fix applied.");
-/* ===== Chat listener & send ===== */
+console.log("Part 2 loaded: auth state handling, topbar updates, logout ready.");
+/* ===== Chat listener & send messages ===== */
 function startChatListener(user) {
   if (!user || !chatBox) return;
   if (unsubscriptions.chat) return;
@@ -252,6 +262,7 @@ function startChatListener(user) {
           chatBox.appendChild(p);
         }
       }
+
       chatBox.scrollTop = chatBox.scrollHeight;
     } catch (err) {
       console.error("Chat render error:", err);
@@ -276,6 +287,7 @@ function startChatListener(user) {
       const text = (msgInput && msgInput.value || "").trim();
       if (!text) return;
       if (!auth.currentUser) return alert("You must be signed in to send messages.");
+
       try {
         await fetchProfile(auth.currentUser.uid); // ensure cached
         const me = profileCache[auth.currentUser.uid] || {};
@@ -305,8 +317,6 @@ function startChatListener(user) {
 }
 
 console.log("Part 3 loaded: chat listener and send message functionality ready.");
-import { arrayUnion } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js"; // ensure arrayUnion is imported
-
 /* ===== Incoming friend requests ===== */
 function startIncomingRequestsListener(user) {
   if (!user || !friendRequestsContainer) return;
@@ -347,12 +357,13 @@ function startIncomingRequestsListener(user) {
         accept.addEventListener("click", async (ev) => {
           ev.stopPropagation();
           try {
-            // update request
+            // update request status
             await updateDoc(doc(db, "friendRequests", d.id), {
               status: "accepted",
               respondedAt: serverTimestamp()
             });
-            // add each other to friends list
+
+            // add each other to friends lists
             const userRef = doc(db, "users", user.uid);
             const otherRef = doc(db, "users", fromUid);
 
@@ -503,8 +514,8 @@ function openProfile(uid) {
   window.location.href = `profile.html?uid=${encodeURIComponent(uid)}`; 
 }
 
-/* ===== Console logging ===== */
+/* ===== Final console logging ===== */
 console.log("script.js fully loaded — topbar, friends list, chat, and requests are active.");
-console.log("All known issues with accept, logout, and friends display have been addressed.");
+console.log("All known issues with accept, logout, chat, and friends display have been addressed.");
 
 /* ===== End of script.js ===== */
