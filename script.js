@@ -1,4 +1,5 @@
-// script.js — updated to explicitly show/hide My Profile button and fix topbar visibility
+// script.js — combined fixed version
+
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import {
@@ -16,10 +17,9 @@ import {
   getDocs,
   arrayUnion
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
-// cloudinary helper only referenced on profile page if needed
-import { uploadProfileImage } from "./cloudinary.js";
+import { uploadProfileImage } from "./cloudinary.js"; // if needed
 
-/* ===== DOM elements (match index.html) ===== */
+/* ===== DOM elements ===== */
 const mePreview = document.getElementById("mePreview");
 const meAvatarSmall = document.getElementById("meAvatarSmall");
 const meName = document.getElementById("meName");
@@ -44,7 +44,7 @@ const friendItemTemplate = document.getElementById("friendItemTemplate");
 /* ===== state & helpers ===== */
 let authChecked = false;
 let unsubscriptions = { chat: null, userDoc: null, requests: null };
-const profileCache = {}; // uid -> profile data cache
+const profileCache = {};
 
 function defaultAvatar() { return "https://www.gravatar.com/avatar/?d=mp&s=160"; }
 function escapeHtml(s = "") { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -60,14 +60,12 @@ async function fetchProfile(uid) {
       profileCache[uid] = snap.data();
       return profileCache[uid];
     }
-  } catch (err) {
-    console.error("fetchProfile error", err);
-  }
+  } catch (err) { console.error("fetchProfile error", err); }
   profileCache[uid] = { username: "Unknown", photoURL: "" };
   return profileCache[uid];
 }
 
-/* ensure users/{uid} exists for the signed-in user */
+/* ensure users/{uid} exists */
 async function ensureMyUserDoc(user) {
   if (!user) return;
   try {
@@ -94,17 +92,15 @@ async function ensureMyUserDoc(user) {
     } else {
       profileCache[user.uid] = snap.data();
     }
-  } catch (err) {
-    console.warn("ensureMyUserDoc error:", err);
-  }
+  } catch (err) { console.warn("ensureMyUserDoc error:", err); }
 }
-/* ===== onAuthStateChanged ===== */
+
+/* ===== auth state changes ===== */
 onAuthStateChanged(auth, async (user) => {
   authChecked = true;
   console.log("Auth state changed:", user ? user.uid : null);
 
   if (!user) {
-    // Signed out: hide profile controls & show auth button
     if (mePreview) mePreview.style.display = "none";
     if (myProfileBtn) { myProfileBtn.style.display = "none"; myProfileBtn.onclick = null; }
     if (logoutBtn) logoutBtn.style.display = "none";
@@ -115,19 +111,13 @@ onAuthStateChanged(auth, async (user) => {
 
     cleanupRealtime();
 
-    // gentle redirect to auth page after 8s
-    setTimeout(() => {
-      if (!auth.currentUser) window.location.replace("auth.html");
-    }, 8000);
-
+    setTimeout(() => { if (!auth.currentUser) window.location.replace("auth.html"); }, 8000);
     return;
   }
 
-  // Signed in: prepare UI
   try {
     await ensureMyUserDoc(user);
 
-    // show topbar elements
     const me = profileCache[user.uid] || await fetchProfile(user.uid);
     if (meAvatarSmall) meAvatarSmall.src = me.photoURL || defaultAvatar();
     if (meName) meName.textContent = me.username || (user.displayName || user.email.split("@")[0]);
@@ -140,13 +130,10 @@ onAuthStateChanged(auth, async (user) => {
     if (friendsContainer) friendsContainer.style.display = "block";
     if (chatContainer) chatContainer.style.display = "block";
 
-    // start realtime listeners
     startUserDocListener(user);
     startChatListener(user);
     startIncomingRequestsListener(user);
-  } catch (err) {
-    console.error("Post-auth initialization error:", err);
-  }
+  } catch (err) { console.error("Post-auth initialization error:", err); }
 });
 
 /* ===== auth buttons ===== */
@@ -160,27 +147,24 @@ if (logoutBtn) logoutBtn.addEventListener("click", async () => {
     cleanupRealtime();
     await signOut(auth);
     window.location.replace("auth.html");
-  } catch (err) {
-    console.error("Logout failed:", err);
-    alert("Logout failed. See console.");
-  }
+  } catch (err) { console.error("Logout failed:", err); alert("Logout failed. See console."); }
 });
-/* ===== Chat listener & send ===== */
+
+/* ===== chat listener & send ===== */
 function startChatListener(user) {
-  if (!user || !chatBox) return;
-  if (unsubscriptions.chat) return;
+  if (!user || !chatBox || unsubscriptions.chat) return;
 
   const messagesRef = collection(db, "servers", "defaultServer", "messages");
   const q = query(messagesRef, orderBy("timestamp"));
 
   unsubscriptions.chat = onSnapshot(q, async (snapshot) => {
     try {
+      chatBox.innerHTML = "";
       const messages = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       const missing = new Set();
       messages.forEach(m => { if (m.senderId && !profileCache[m.senderId]) missing.add(m.senderId); });
       if (missing.size) await Promise.all(Array.from(missing).map(uid => fetchProfile(uid)));
 
-      chatBox.innerHTML = "";
       for (const m of messages) {
         const uid = m.senderId;
         const prof = uid ? (profileCache[uid] || { username: m.senderName || "Unknown", photoURL: m.senderPhotoURL || "" }) : { username: m.senderName || "Unknown", photoURL: "" };
@@ -195,19 +179,11 @@ function startChatListener(user) {
           const timeEl = clone.querySelector(".time");
           const textEl = clone.querySelector(".message-text");
 
-          img.src = avatar;
-          img.setAttribute("data-uid", uid || "");
-          img.style.cursor = uid ? "pointer" : "default";
+          img.src = avatar; img.setAttribute("data-uid", uid || ""); img.style.cursor = uid ? "pointer" : "default";
+          senderNameEl.textContent = name; senderNameEl.setAttribute("data-uid", uid || ""); senderNameEl.style.cursor = uid ? "pointer" : "default";
+          timeEl.textContent = timeStr; textEl.innerHTML = escapeHtml(m.text || "");
 
-          senderNameEl.textContent = name;
-          senderNameEl.setAttribute("data-uid", uid || "");
-          senderNameEl.style.cursor = uid ? "pointer" : "default";
-
-          timeEl.textContent = timeStr;
-          textEl.innerHTML = escapeHtml(m.text || "");
-
-          const wrapper = document.createElement("div");
-          wrapper.appendChild(clone);
+          const wrapper = document.createElement("div"); wrapper.appendChild(clone);
           chatBox.appendChild(wrapper.firstElementChild || wrapper);
         } else {
           const p = document.createElement("p");
@@ -216,9 +192,7 @@ function startChatListener(user) {
         }
       }
       chatBox.scrollTop = chatBox.scrollHeight;
-    } catch (err) {
-      console.error("Chat render error:", err);
-    }
+    } catch (err) { console.error("Chat render error:", err); }
   }, err => {
     console.error("Chat onSnapshot error:", err);
     if (err && err.code === "permission-denied" && chatBox) {
@@ -226,21 +200,19 @@ function startChatListener(user) {
     }
   });
 
-  // name/avatar click -> profile
   chatBox.addEventListener("click", (ev) => {
     const t = ev.target;
     const uid = t.getAttribute?.("data-uid") || t.closest?.("[data-uid]")?.getAttribute("data-uid");
     if (uid) openProfile(uid);
   });
 
-  // send messages
   if (sendBtn) {
     sendBtn.onclick = async () => {
       const text = (msgInput && msgInput.value || "").trim();
       if (!text) return;
       if (!auth.currentUser) return alert("You must be signed in to send messages.");
       try {
-        await fetchProfile(auth.currentUser.uid); // ensure cached
+        await fetchProfile(auth.currentUser.uid);
         const me = profileCache[auth.currentUser.uid] || {};
         await addDoc(collection(db, "servers", "defaultServer", "messages"), {
           text,
@@ -250,36 +222,25 @@ function startChatListener(user) {
           timestamp: serverTimestamp()
         });
         if (msgInput) msgInput.value = "";
-      } catch (err) {
-        console.error("Send message failed:", err);
-        alert("Failed to send message. See console.");
-      }
+      } catch (err) { console.error("Send message failed:", err); alert("Failed to send message. See console."); }
     };
 
-    if (msgInput) {
-      msgInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          sendBtn.click();
-        }
-      });
-    }
+    if (msgInput) msgInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
+    });
   }
 }
 
 /* ===== Incoming friend requests ===== */
 function startIncomingRequestsListener(user) {
-  if (!user || !friendRequestsContainer) return;
-  if (unsubscriptions.requests) return;
+  if (!user || !friendRequestsContainer || unsubscriptions.requests) return;
 
   const q = query(collection(db, "friendRequests"), where("toUid", "==", user.uid), where("status", "==", "pending"));
   unsubscriptions.requests = onSnapshot(q, async snapshot => {
     try {
       friendRequestsContainer.innerHTML = "";
-      if (snapshot.empty) {
-        friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
-        return;
-      }
+      if (snapshot.empty) { friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>"; return; }
+
       for (const d of snapshot.docs) {
         const data = d.data();
         const fromUid = data.fromUid;
@@ -296,11 +257,8 @@ function startIncomingRequestsListener(user) {
           ev.stopPropagation();
           try {
             await updateDoc(doc(db, "friendRequests", d.id), { status: "accepted", respondedAt: serverTimestamp() });
-            // Update friends array for both users
-            const meRef = doc(db, "users", user.uid);
-            const themRef = doc(db, "users", fromUid);
-            await updateDoc(meRef, { friends: arrayUnion(fromUid) });
-            await updateDoc(themRef, { friends: arrayUnion(user.uid) });
+            await updateDoc(doc(db, "users", user.uid), { friends: arrayUnion(fromUid) });
+            await updateDoc(doc(db, "users", fromUid), { friends: arrayUnion(user.uid) });
           } catch (err) { console.error("Accept failed", err); alert("Accept failed"); }
         });
 
@@ -318,46 +276,37 @@ function startIncomingRequestsListener(user) {
         wrapper.addEventListener("click", () => openProfile(fromUid));
         friendRequestsContainer.appendChild(wrapper);
       }
-    } catch (err) {
-      console.error("Requests render error:", err);
-      friendRequestsContainer.innerHTML = "<div class='small'>Failed to load requests</div>";
-    }
+    } catch (err) { console.error("Requests render error:", err); friendRequestsContainer.innerHTML = "<div class='small'>Failed to load requests</div>"; }
   }, err => {
     console.error("Requests onSnapshot error:", err);
     friendRequestsContainer.innerHTML = "<div class='small' style='color:crimson'>Permission error loading requests</div>";
   });
 }
-/* ===== User doc listener for friends & topbar updates ===== */
+
+/* ===== User doc listener ===== */
 function startUserDocListener(user) {
-  if (!user) return;
-  if (unsubscriptions.userDoc) return;
+  if (!user || unsubscriptions.userDoc) return;
 
   const userRef = doc(db, "users", user.uid);
   unsubscriptions.userDoc = onSnapshot(userRef, async snap => {
-    if (!snap.exists()) {
-      console.warn("User doc missing after login:", user.uid);
-      return;
-    }
+    if (!snap.exists()) { console.warn("User doc missing after login:", user.uid); return; }
     const data = snap.data();
     profileCache[user.uid] = data;
 
-    // Update topbar display
     if (meAvatarSmall) meAvatarSmall.src = data.photoURL || defaultAvatar();
     if (meName) meName.textContent = data.username || (auth.currentUser?.email || "User");
     if (mePreview) mePreview.style.display = "inline-flex";
-    if (myProfileBtn) myProfileBtn.style.display = "inline-block"; // explicit show
+    if (myProfileBtn) myProfileBtn.style.display = "inline-block";
     if (logoutBtn) logoutBtn.style.display = "inline-block";
     if (authBtn) authBtn.style.display = "none";
     if (friendsContainer) friendsContainer.style.display = "block";
     if (chatContainer) chatContainer.style.display = "block";
 
-    // render friends list
     try {
       const friends = Array.isArray(data.friends) ? data.friends : [];
       friendsList.innerHTML = "";
-      if (!friends.length) {
-        friendsList.innerHTML = "<div class='small'>No friends yet</div>";
-      } else {
+      if (!friends.length) { friendsList.innerHTML = "<div class='small'>No friends yet</div>"; }
+      else {
         await Promise.all(friends.map(uid => fetchProfile(uid)));
         for (const uid of friends) {
           const p = profileCache[uid] || { username: uid, photoURL: "" };
@@ -383,22 +332,18 @@ function startUserDocListener(user) {
           }
         }
       }
-    } catch (err) {
-      console.error("Error rendering friends", err);
-      friendsList.innerHTML = "<div class='small'>Failed to load friends</div>";
-    }
-  }, err => {
-    console.error("User doc snapshot error:", err);
-    if (friendsList) friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
-  });
+    } catch (err) { console.error("Error rendering friends", err); friendsList.innerHTML = "<div class='small'>Failed to load friends</div>"; }
+  }, err => { console.error("User doc snapshot error:", err); friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>"; });
+}
+
+/* ===== cleanup realtime listeners ===== */
+function cleanupRealtime() {
+  if (unsubscriptions.chat) { unsubscriptions.chat(); unsubscriptions.chat = null; }
+  if (unsubscriptions.userDoc) { unsubscriptions.userDoc(); unsubscriptions.userDoc = null; }
+  if (unsubscriptions.requests) { unsubscriptions.requests(); unsubscriptions.requests = null; }
 }
 
 /* ===== Safety fallback redirect ===== */
-setTimeout(() => {
-  if (!authChecked) {
-    console.warn("Auth check timed out; redirecting to auth.html");
-    window.location.replace("auth.html");
-  }
-}, 10000);
+setTimeout(() => { if (!authChecked) { console.warn("Auth check timed out; redirecting to auth.html"); window.location.replace("auth.html"); } }, 10000);
 
-console.log("script.js loaded — topbar controls will show/hide based on auth state. If My Profile still doesn't appear, check console for errors and that the myProfileBtn element exists.");
+console.log("script.js loaded — topbar, chat, and friends list fully reactive.");
