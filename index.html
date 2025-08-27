@@ -1,18 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Yester Chat</title>
-  <link rel="stylesheet" href="style.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* Minimal inline layout helpers so you can test immediately */
+    body { margin:0; font-family:Inter,system-ui,Arial; background:#f6f8fb; color:#111; }
+    #topbar { display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:#fff; border-bottom:1px solid #eee; }
+    .topbar-left { display:flex; gap:12px; align-items:center; }
+    .topbar-btn { margin-left:8px; padding:8px 10px; border-radius:8px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    .chat-container { max-width:1024px; margin:20px auto; display:flex; gap:12px; padding:12px; }
+    .friends-container { width:260px; }
+    .friends-container .card, .chat-column .card { background:#fff; padding:12px; border-radius:10px; border:1px solid #eee; box-shadow:0 6px 18px rgba(12,20,40,0.03); }
+    .chat-column { flex:1; display:flex; flex-direction:column; gap:12px; }
+    .chat-box { background:#fff; border-radius:8px; border:1px solid #eee; height:440px; overflow:auto; padding:12px; }
+    .composer { display:flex; gap:8px; padding-top:6px; }
+    #msgInput { flex:1; padding:10px; border-radius:8px; border:1px solid #ddd; }
+    #sendBtn { padding:10px 14px; border-radius:8px; background:#2f6cff; color:#fff; border:none; cursor:pointer; }
+    .avatar-small { width:36px; height:36px; border-radius:50%; object-fit:cover; }
+    .friend-item { display:flex; gap:8px; align-items:center; padding:8px; border-radius:8px; cursor:pointer; }
+    .friend-item:hover { background:#fbfbff; }
+    .small { color:#666; font-size:0.9rem; }
+    .hidden { display:none; }
+  </style>
 </head>
 <body>
+
   <!-- TOPBAR -->
   <div id="topbar">
-    <!-- Current User Preview -->
-    <div id="mePreview" style="display:none;">
-      <img id="meAvatarSmall" src="" class="avatar-small" alt="Profile" />
-      <span id="meName"></span>
-      <button id="myProfileBtn" class="topbar-btn">My Profile</button>
+    <div class="topbar-left">
+      <div id="mePreview" style="display:none; align-items:center;">
+        <img id="meAvatarSmall" src="" class="avatar-small" alt="Profile" />
+        <span id="meName" style="margin-left:8px; font-weight:600;"></span>
+        <button id="myProfileBtn" class="topbar-btn">My Profile</button>
+      </div>
     </div>
 
     <!-- Auth Controls -->
@@ -22,27 +45,50 @@
     </div>
   </div>
 
-  <!-- FRIENDS LIST -->
-  <div id="friendsContainer" style="display:none;" class="friends-container">
-    <h2>Friends</h2>
-    <ul id="friendsList"></ul>
-  </div>
+  <!-- LAYOUT: Friends column + Chat column -->
+  <div class="chat-container" id="appShell">
 
-  <!-- CHAT CONTAINER -->
-  <div id="chatContainer" class="chat-container" style="display:none;">
-    <h1>Yester Chat</h1>
-    <div id="chat" class="chat-box"></div>
-    <div id="composer" class="composer">
-      <input id="msgInput" type="text" placeholder="Type a message..." />
-      <button id="sendBtn">Send</button>
+    <!-- FRIENDS LIST -->
+    <div id="friendsContainer" class="friends-container hidden">
+      <div class="card">
+        <h3 style="margin:0 0 8px 0">Friends</h3>
+        <ul id="friendsList" style="list-style:none; padding:0; margin:0;"></ul>
+
+        <hr style="margin:12px 0" />
+        <h4 style="margin:0 0 8px 0">Incoming Requests</h4>
+        <div id="friendRequests" class="small">No incoming requests</div>
+      </div>
     </div>
+
+    <!-- CHAT -->
+    <div class="chat-column">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+          <h2 style="margin:0">Yester Chat</h2>
+          <div id="signedOutNotice" class="small">Not signed in — you will be redirected to the login page shortly.</div>
+        </div>
+      </div>
+
+      <div id="chatContainer" class="card chat-column-item" style="display:none;">
+        <div id="chat" class="chat-box" aria-live="polite"></div>
+
+        <div id="composer" class="composer" style="margin-top:8px;">
+          <input id="msgInput" type="text" placeholder="Type a message..." autocomplete="off" />
+          <button id="sendBtn">Send</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <!-- Templates (hidden) -->
+  <!-- Templates -->
   <template id="chatMessageTemplate">
-    <div class="chat-message">
-      <span class="chat-user" data-uid=""></span>:
-      <span class="chat-text"></span>
+    <div class="message-row" style="display:flex; gap:10px; align-items:flex-start; margin-bottom:10px;">
+      <img class="avatar" src="" width="40" height="40" style="border-radius:50%; object-fit:cover" />
+      <div class="message-content">
+        <div class="message-meta"><span class="sender-name"></span> <span class="small time"></span></div>
+        <div class="message-text"></div>
+      </div>
     </div>
   </template>
 
