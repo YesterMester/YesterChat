@@ -1,4 +1,4 @@
-// script.js — friend request acceptance fix added
+// script.js — updated to explicitly show/hide My Profile button and fix topbar visibility
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import {
@@ -16,11 +16,10 @@ import {
   getDocs,
   arrayUnion
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
-
 // cloudinary helper only referenced on profile page if needed
 import { uploadProfileImage } from "./cloudinary.js";
 
-/* ===== DOM elements ===== */
+/* ===== DOM elements (match index.html) ===== */
 const mePreview = document.getElementById("mePreview");
 const meAvatarSmall = document.getElementById("meAvatarSmall");
 const meName = document.getElementById("meName");
@@ -51,6 +50,7 @@ function defaultAvatar() { return "https://www.gravatar.com/avatar/?d=mp&s=160";
 function escapeHtml(s = "") { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function openProfile(uid) { if (!uid) return; window.location.href = `profile.html?uid=${encodeURIComponent(uid)}`; }
 
+/* fetch & cache profile */
 async function fetchProfile(uid) {
   if (!uid) return { username: "Unknown", photoURL: "" };
   if (profileCache[uid]) return profileCache[uid];
@@ -67,6 +67,7 @@ async function fetchProfile(uid) {
   return profileCache[uid];
 }
 
+/* ensure users/{uid} exists for the signed-in user */
 async function ensureMyUserDoc(user) {
   if (!user) return;
   try {
@@ -96,16 +97,6 @@ async function ensureMyUserDoc(user) {
   } catch (err) {
     console.warn("ensureMyUserDoc error:", err);
   }
-}
-
-function cleanupRealtime() {
-  try { if (unsubscriptions.chat) unsubscriptions.chat(); } catch {}
-  try { if (unsubscriptions.userDoc) unsubscriptions.userDoc(); } catch {}
-  try { if (unsubscriptions.requests) unsubscriptions.requests(); } catch {}
-  unsubscriptions = { chat: null, userDoc: null, requests: null };
-  if (chatBox) chatBox.innerHTML = "";
-  if (friendsList) friendsList.innerHTML = "";
-  if (friendRequestsContainer) friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
 }
 /* ===== onAuthStateChanged ===== */
 onAuthStateChanged(auth, async (user) => {
@@ -174,7 +165,6 @@ if (logoutBtn) logoutBtn.addEventListener("click", async () => {
     alert("Logout failed. See console.");
   }
 });
-
 /* ===== Chat listener & send ===== */
 function startChatListener(user) {
   if (!user || !chatBox) return;
@@ -276,17 +266,13 @@ function startChatListener(user) {
     }
   }
 }
+
 /* ===== Incoming friend requests ===== */
 function startIncomingRequestsListener(user) {
   if (!user || !friendRequestsContainer) return;
   if (unsubscriptions.requests) return;
 
-  const q = query(
-    collection(db, "friendRequests"),
-    where("toUid", "==", user.uid),
-    where("status", "==", "pending")
-  );
-
+  const q = query(collection(db, "friendRequests"), where("toUid", "==", user.uid), where("status", "==", "pending"));
   unsubscriptions.requests = onSnapshot(q, async snapshot => {
     try {
       friendRequestsContainer.innerHTML = "";
@@ -294,76 +280,40 @@ function startIncomingRequestsListener(user) {
         friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
         return;
       }
-
       for (const d of snapshot.docs) {
         const data = d.data();
         const fromUid = data.fromUid;
         const prof = await fetchProfile(fromUid);
-
         const wrapper = document.createElement("div");
         wrapper.className = "friend-request-row";
-        wrapper.innerHTML = `
-          <img src="${escapeHtml(prof.photoURL || defaultAvatar())}" class="avatar-small" />
-          <strong style="margin-left:8px">${escapeHtml(prof.username || fromUid)}</strong>
-        `;
+        wrapper.innerHTML = `<img src="${escapeHtml(prof.photoURL || defaultAvatar())}" class="avatar-small" />
+          <strong style="margin-left:8px">${escapeHtml(prof.username || fromUid)}</strong>`;
 
-        const accept = document.createElement("button");
-        accept.textContent = "Accept";
+        const accept = document.createElement("button"); accept.textContent = "Accept";
+        const decline = document.createElement("button"); decline.textContent = "Decline";
 
-        const decline = document.createElement("button");
-        decline.textContent = "Decline";
-
-        // Accept button logic: update friend request + add each other to friends
         accept.addEventListener("click", async (ev) => {
           ev.stopPropagation();
           try {
-            // Update request to accepted
-            await updateDoc(doc(db, "friendRequests", d.id), {
-              status: "accepted",
-              respondedAt: serverTimestamp()
-            });
-
-            // Add each other to friends array
-            const toUserRef = doc(db, "users", user.uid);
-            const fromUserRef = doc(db, "users", fromUid);
-
-            await updateDoc(toUserRef, {
-              friends: Array.from(new Set([...(profileCache[user.uid].friends || []), fromUid]))
-            });
-
-            await updateDoc(fromUserRef, {
-              friends: Array.from(new Set([...(profileCache[fromUid]?.friends || []), user.uid]))
-            });
-
-            // Force fetch updated profiles
-            await fetchProfile(fromUid);
-            await fetchProfile(user.uid);
-
-          } catch (err) {
-            console.error("Accept failed", err);
-            alert("Accept failed. See console.");
-          }
+            await updateDoc(doc(db, "friendRequests", d.id), { status: "accepted", respondedAt: serverTimestamp() });
+            // Update friends array for both users
+            const meRef = doc(db, "users", user.uid);
+            const themRef = doc(db, "users", fromUid);
+            await updateDoc(meRef, { friends: arrayUnion(fromUid) });
+            await updateDoc(themRef, { friends: arrayUnion(user.uid) });
+          } catch (err) { console.error("Accept failed", err); alert("Accept failed"); }
         });
 
-        // Decline button logic: just update request status
         decline.addEventListener("click", async (ev) => {
           ev.stopPropagation();
-          try {
-            await updateDoc(doc(db, "friendRequests", d.id), {
-              status: "declined",
-              respondedAt: serverTimestamp()
-            });
-          } catch (err) {
-            console.error("Decline failed", err);
-            alert("Decline failed. See console.");
-          }
+          try { await updateDoc(doc(db, "friendRequests", d.id), { status: "declined", respondedAt: serverTimestamp() }); } 
+          catch (err) { console.error("Decline failed", err); alert("Decline failed"); }
         });
 
-        const btnWrap = document.createElement("span");
-        btnWrap.style.marginLeft = "8px";
-        btnWrap.appendChild(accept);
+        const btnWrap = document.createElement("span"); 
+        btnWrap.style.marginLeft = "8px"; 
+        btnWrap.appendChild(accept); 
         btnWrap.appendChild(decline);
-
         wrapper.appendChild(btnWrap);
         wrapper.addEventListener("click", () => openProfile(fromUid));
         friendRequestsContainer.appendChild(wrapper);
@@ -377,7 +327,6 @@ function startIncomingRequestsListener(user) {
     friendRequestsContainer.innerHTML = "<div class='small' style='color:crimson'>Permission error loading requests</div>";
   });
 }
-
 /* ===== User doc listener for friends & topbar updates ===== */
 function startUserDocListener(user) {
   if (!user) return;
@@ -396,13 +345,13 @@ function startUserDocListener(user) {
     if (meAvatarSmall) meAvatarSmall.src = data.photoURL || defaultAvatar();
     if (meName) meName.textContent = data.username || (auth.currentUser?.email || "User");
     if (mePreview) mePreview.style.display = "inline-flex";
-    if (myProfileBtn) myProfileBtn.style.display = "inline-block";
+    if (myProfileBtn) myProfileBtn.style.display = "inline-block"; // explicit show
     if (logoutBtn) logoutBtn.style.display = "inline-block";
     if (authBtn) authBtn.style.display = "none";
     if (friendsContainer) friendsContainer.style.display = "block";
     if (chatContainer) chatContainer.style.display = "block";
 
-    // Render friends list
+    // render friends list
     try {
       const friends = Array.isArray(data.friends) ? data.friends : [];
       friendsList.innerHTML = "";
@@ -443,6 +392,7 @@ function startUserDocListener(user) {
     if (friendsList) friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
   });
 }
+
 /* ===== Safety fallback redirect ===== */
 setTimeout(() => {
   if (!authChecked) {
@@ -451,7 +401,4 @@ setTimeout(() => {
   }
 }, 10000);
 
-console.log("script.js loaded — topbar controls will show/hide based on auth state. " +
-  "If My Profile still doesn't appear, check console for errors and that the myProfileBtn element exists.");
-
-// End of script.js
+console.log("script.js loaded — topbar controls will show/hide based on auth state. If My Profile still doesn't appear, check console for errors and that the myProfileBtn element exists.");
