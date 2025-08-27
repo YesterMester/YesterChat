@@ -8,14 +8,24 @@
 <body>
   <!-- TOPBAR -->
   <div id="topbar">
+    <!-- Current User Preview -->
     <div id="mePreview" style="display:none;">
       <img id="meAvatarSmall" src="" class="avatar-small" alt="Profile" />
       <span id="meName"></span>
+      <button id="myProfileBtn" class="topbar-btn">My Profile</button>
     </div>
+
+    <!-- Auth Controls -->
     <div id="authButtons">
-      <button id="authBtn">Sign In / Sign Up</button>
-      <button id="logoutBtn" style="display:none;">Logout</button>
+      <button id="authBtn" class="topbar-btn">Sign In / Sign Up</button>
+      <button id="logoutBtn" class="topbar-btn" style="display:none;">Logout</button>
     </div>
+  </div>
+
+  <!-- FRIENDS LIST -->
+  <div id="friendsContainer" style="display:none;" class="friends-container">
+    <h2>Friends</h2>
+    <ul id="friendsList"></ul>
   </div>
 
   <!-- CHAT CONTAINER -->
@@ -28,38 +38,20 @@
     </div>
   </div>
 
-  <script type="module" src="./script.js"></script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Yester Chat</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <!-- TOPBAR -->
-  <div id="topbar">
-    <div id="mePreview" style="display:none;">
-      <img id="meAvatarSmall" src="" class="avatar-small" alt="Profile" />
-      <span id="meName"></span>
+  <!-- Templates (hidden) -->
+  <template id="chatMessageTemplate">
+    <div class="chat-message">
+      <span class="chat-user" data-uid=""></span>:
+      <span class="chat-text"></span>
     </div>
-    <div id="authButtons">
-      <button id="authBtn">Sign In / Sign Up</button>
-      <button id="logoutBtn" style="display:none;">Logout</button>
-    </div>
-  </div>
+  </template>
 
-  <!-- CHAT CONTAINER -->
-  <div id="chatContainer" class="chat-container" style="display:none;">
-    <h1>Yester Chat</h1>
-    <div id="chat" class="chat-box"></div>
-    <div id="composer" class="composer">
-      <input id="msgInput" type="text" placeholder="Type a message..." />
-      <button id="sendBtn">Send</button>
-    </div>
-  </div>
+  <template id="friendItemTemplate">
+    <li class="friend-item">
+      <img class="friend-avatar avatar-small" src="" alt="Avatar" />
+      <span class="friend-name" data-uid=""></span>
+    </li>
+  </template>
 
   <script type="module" src="./script.js"></script>
 </body>
