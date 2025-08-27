@@ -17,7 +17,6 @@
     }
 
     html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial,Helvetica,sans-serif;background:var(--bg);color:#0f172a;}
-    
     /* TOPBAR */
     #topbar{
       display:flex;
@@ -47,7 +46,7 @@
     }
     #brand h1{font-size:18px;margin:0;color:#fff;}
 
-    /* me preview */
+    /* me preview (avatar + name + profile button) */
     #mePreview{display:flex;align-items:center;gap:10px;}
     #mePreview img.avatar-small{
       width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.18);
@@ -55,7 +54,7 @@
     }
     #meName{font-weight:600;color:#fff;font-size:15px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;}
 
-    /* topbar buttons */
+    /* topbar buttons — transparent on gradient background */
     .topbar-btn{
       -webkit-appearance:none;
       appearance:none;
@@ -75,6 +74,35 @@
       border-color: rgba(0,0,0,0.06);
     }
     .topbar-btn.primary:hover{ background: #f4f6ff; }
+
+    /* LAYOUT: wrapper under topbar */
+    .app-shell{ max-width:1100px; margin:20px auto; padding:0 14px; display:flex; gap:16px; align-items:flex-start; }
+    .friends-container{ width:260px; flex:0 0 260px; }
+    .card{ background:var(--panel); padding:14px; border-radius:12px; border:1px solid var(--surface-border); box-shadow:0 6px 18px rgba(12,20,40,0.03); }
+
+    .chat-column{ flex:1; display:flex; flex-direction:column; gap:12px; min-width:0; }
+    .chat-box{ background:var(--panel); border-radius:10px; border:1px solid var(--surface-border); height:520px; overflow:auto; padding:12px; }
+    .composer{ display:flex; gap:8px; align-items:center; margin-top:6px; }
+    #msgInput{ flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--surface-border); font-size:15px; }
+    #sendBtn{ padding:10px 14px; border-radius:10px; border:none; background:var(--accent); color:white; cursor:pointer; font-weight:600; }
+
+    .avatar-small{ width:36px;height:36px;border-radius:50%;object-fit:cover; }
+    .friend-item{ display:flex;gap:10px;align-items:center;padding:8px;border-radius:8px;cursor:pointer; }
+    .friend-item:hover{ background:#fbfbff; }
+    .friend-avatar{ width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid #eee; }
+
+    .message-row{ display:flex; gap:10px; align-items:flex-start; margin-bottom:12px; }
+    .message-content .message-meta{ font-size:13px; color:#0f172a; font-weight:700; margin-bottom:6px; }
+    .message-text{ background:#f7f9ff; padding:10px 12px; border-radius:8px; display:inline-block; color:#0f172a; }
+
+    .small{ color:var(--muted); font-size:0.9rem; }
+
+    /* responsive */
+    @media (max-width:900px){
+      .app-shell{ flex-direction:column; padding:12px; }
+      .friends-container{ width:100%; order:2; }
+      .chat-column{ order:1; }
+    }
   </style>
 </head>
 <body>
@@ -101,7 +129,8 @@
       <button id="logoutBtn" class="topbar-btn" style="display:none;">Logout</button>
     </div>
   </div>
-<!-- MAIN SHELL -->
+
+  <!-- MAIN SHELL -->
   <div class="app-shell">
 
     <!-- FRIENDS -->
@@ -131,15 +160,13 @@
       </section>
     </main>
   </div>
-<!-- Templates -->
+
+  <!-- Templates -->
   <template id="chatMessageTemplate">
     <div class="message-row">
       <img class="avatar" src="" width="40" height="40" style="border-radius:50%;object-fit:cover;border:1px solid #eee" />
       <div class="message-content">
-        <div class="message-meta">
-          <span class="sender-name"></span>
-          <span class="small time"></span>
-        </div>
+        <div class="message-meta"><span class="sender-name"></span> <span class="small time"></span></div>
         <div class="message-text"></div>
       </div>
     </div>
@@ -151,5 +178,7 @@
       <span class="friend-name" data-uid=""></span>
     </li>
   </template>
-<!-- Main JavaScript -->
-  <script type="module" src="./script.js">
+
+  <script type="module" src="./script.js"></script>
+</body>
+</html>
