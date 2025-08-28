@@ -1,16 +1,16 @@
 /*
  * =========================================================================================
- * YESTER CHAT: PROFILE.JS (REWRITTEN)
+ * YESTER CHAT: PROFILE.JS (REVISED)
  * =========================================================================================
  * This script manages user profiles, editing, friend requests, and friend lists.
  *
  * Key Fixes & Improvements:
- * 1.  **Profile Editing:** The edit form now reliably shows for the logged-in user.
- * 2.  **Friend Requests:** Sending requests is now a robust async operation with UI feedback.
- * 3.  **Mutual Unfriending:** Removing a friend now correctly updates the relationship for both users.
- * 4.  **Live Friends List:** The friends list is now rendered directly by this script and updates in real-time.
- * 5.  **Code Structure:** Logic is better organized, with clear functions for each action and robust error handling.
- * 6.  **User Experience:** Buttons are disabled and text is updated during actions (e.g., "Saving...", "Sending...") to give the user clear feedback.
+ * 1.  **Robust Loading:** Added a try...catch block to the main auth listener to prevent
+ * silent failures. If a profile can't be loaded, an error will now appear in the
+ * console, and a message will show on the screen.
+ * 2.  **Error Logging:** Enhanced error logging throughout the script to make future
+ * debugging easier.
+ * 3.  **Code Consistency:** Ensured all Firebase imports use a consistent, modern version.
  * =========================================================================================
  */
 
@@ -30,9 +30,8 @@ import {
   setDoc,
   getDocs,
   onSnapshot,
-  arrayUnion,
   arrayRemove,
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"; // Note: Using a specific stable version
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   onAuthStateChanged,
   updateProfile as updateAuthProfile,
@@ -61,25 +60,18 @@ const friendsList = document.getElementById("friendsList");
 
 /* ---------- Part 2: State & Helpers ---------- */
 
-let currentUser = null; // The authenticated user object
-let viewedProfileData = null; // The profile data of the user being viewed
-let friendsListenerUnsubscribe = null; // To stop the friends listener
+let currentUser = null;
+let viewedProfileData = null;
+let friendsListenerUnsubscribe = null;
 
-// --- Helper Functions ---
 const defaultAvatar = () => "https://www.gravatar.com/avatar/?d=mp&s=160";
 const getUidFromUrl = () => new URLSearchParams(window.location.search).get("uid");
 
-/**
- * Toggles the disabled state and text of a button.
- * @param {HTMLButtonElement} btn The button element.
- * @param {boolean} isLoading Whether the button should be in a loading state.
- * @param {string} text The text to display when not loading.
- */
 function setButtonLoading(btn, isLoading, text = "Save") {
-  if (btn) {
-    btn.disabled = isLoading;
-    btn.textContent = isLoading ? `${text.replace(/e$/, "")}ing...` : text;
-  }
+  if (!btn) return;
+  btn.disabled = isLoading;
+  const actionText = text.endsWith('e') ? text.slice(0, -1) : text;
+  btn.textContent = isLoading ? `${actionText}ing...` : text;
 }
 
 /* ---------- Part 3: Core Logic & Profile Rendering ---------- */
@@ -90,10 +82,18 @@ function setButtonLoading(btn, isLoading, text = "Save") {
 export function initAuthListener() {
   onAuthStateChanged(auth, async (user) => {
     if (user) {
-      currentUser = user;
-      const viewedUid = getUidFromUrl() || currentUser.uid;
-      await ensureUserDocExists(user);
-      await loadProfilePage(viewedUid);
+      // **FIX:** Added a try...catch block to handle errors during initialization.
+      // This prevents the entire script from failing silently.
+      try {
+        currentUser = user;
+        const viewedUid = getUidFromUrl() || currentUser.uid;
+        await ensureUserDocExists(user);
+        await loadProfilePage(viewedUid);
+      } catch (error) {
+        console.error("Failed to initialize profile page:", error);
+        profileUsername.textContent = "Error Loading Profile";
+        profileBio.textContent = "Could not load user data. Please check the console for errors and try again later.";
+      }
     } else {
       window.location.replace("auth.html");
     }
@@ -102,13 +102,13 @@ export function initAuthListener() {
 
 /**
  * Creates a user document in Firestore if it doesn't already exist.
- * @param {object} user The Firebase auth user object.
  */
 async function ensureUserDocExists(user) {
   const userRef = doc(db, "users", user.uid);
   const docSnap = await getDoc(userRef);
   if (!docSnap.exists()) {
-    const usernameDefault = user.email ? user.email.split("@")[0] : "new_user";
+    console.log(`Creating user document for ${user.uid}`);
+    const usernameDefault = user.email ? user.email.split("@")[0].replace(/[^a-zA-Z0-9]/g, '') : "new_user";
     await setDoc(userRef, {
       username: usernameDefault,
       usernameLower: usernameDefault.toLowerCase(),
@@ -122,7 +122,6 @@ async function ensureUserDocExists(user) {
 
 /**
  * Fetches data and renders the entire profile page for a given UID.
- * @param {string} uid The UID of the profile to load.
  */
 async function loadProfilePage(uid) {
   const userRef = doc(db, "users", uid);
@@ -140,12 +139,10 @@ async function loadProfilePage(uid) {
 
   viewedProfileData = { uid, ...docSnap.data() };
 
-  // Render basic profile info
   profileAvatar.src = viewedProfileData.photoURL || defaultAvatar();
   profileUsername.textContent = viewedProfileData.username;
   profileBio.textContent = viewedProfileData.bio;
 
-  // Determine if viewing own profile or another user's
   if (uid === currentUser.uid) {
     renderOwnerView();
   } else {
@@ -162,12 +159,10 @@ function renderOwnerView() {
   editArea.style.display = "block";
   profileActions.innerHTML = `<div class="small">This is your public profile. Use the form to make changes.</div>`;
 
-  // Populate edit form with current data
   editUsername.value = viewedProfileData.username;
   editBio.value = viewedProfileData.bio;
   editAvatarPreview.src = viewedProfileData.photoURL || defaultAvatar();
 
-  // Start listening for real-time friend updates
   startFriendsListener();
 }
 
@@ -175,53 +170,51 @@ function renderOwnerView() {
  * Renders the view for a visitor (shows friend actions, hides sensitive info).
  */
 async function renderVisitorView() {
-  profileEmail.textContent = ""; // Hide email from visitors
+  profileEmail.textContent = "";
   editArea.style.display = "none";
-  friendsListContainer.style.display = "none"; // Hide other users' friend lists
+  friendsListContainer.style.display = "none";
+  profileActions.innerHTML = `<p class="small">Loading actions...</p>`;
 
-  // Setup action buttons (Add/Unfriend, etc.)
-  profileActions.innerHTML = ""; // Clear previous buttons
-  const loadingIndicator = document.createElement("p");
-  loadingIndicator.textContent = "Loading actions...";
-  profileActions.appendChild(loadingIndicator);
+  try {
+    const myProfileSnap = await getDoc(doc(db, "users", currentUser.uid));
+    if (!myProfileSnap.exists()) throw new Error("Could not find your own user profile.");
 
-  // Check friendship status
-  const myProfileSnap = await getDoc(doc(db, "users", currentUser.uid));
-  const myFriends = myProfileSnap.data()?.friends || [];
-  const isFriend = myFriends.includes(viewedProfileData.uid);
+    const myFriends = myProfileSnap.data()?.friends || [];
+    const isFriend = myFriends.includes(viewedProfileData.uid);
+    profileActions.innerHTML = ""; // Clear loading text
 
-  loadingIndicator.remove(); // Remove loading text
-
-  if (isFriend) {
-    const unfriendBtn = document.createElement("button");
-    unfriendBtn.textContent = "Unfriend";
-    unfriendBtn.onclick = () => removeFriend(viewedProfileData.uid, unfriendBtn);
-    profileActions.appendChild(unfriendBtn);
-  } else {
-    // Check for pending friend requests
-    const q = query(
-      collection(db, "friendRequests"),
-      where("fromUid", "in", [currentUser.uid, viewedProfileData.uid]),
-      where("toUid", "in", [currentUser.uid, viewedProfileData.uid]),
-      where("status", "==", "pending")
-    );
-    const requestSnap = await getDocs(q);
-
-    if (!requestSnap.empty) {
-      const request = requestSnap.docs[0].data();
-      const statusText = document.createElement("p");
-      statusText.className = "small";
-      statusText.textContent =
-        request.fromUid === currentUser.uid
-          ? "Friend request sent."
-          : "This user sent you a friend request.";
-      profileActions.appendChild(statusText);
+    if (isFriend) {
+      const unfriendBtn = document.createElement("button");
+      unfriendBtn.textContent = "Unfriend";
+      unfriendBtn.onclick = () => removeFriend(viewedProfileData.uid, unfriendBtn);
+      profileActions.appendChild(unfriendBtn);
     } else {
-      const addFriendBtn = document.createElement("button");
-      addFriendBtn.textContent = "Add Friend";
-      addFriendBtn.onclick = () => sendFriendRequest(viewedProfileData.uid, addFriendBtn);
-      profileActions.appendChild(addFriendBtn);
+      const q = query(
+        collection(db, "friendRequests"),
+        where("fromUid", "in", [currentUser.uid, viewedProfileData.uid]),
+        where("toUid", "in", [currentUser.uid, viewedProfileData.uid]),
+        where("status", "==", "pending")
+      );
+      const requestSnap = await getDocs(q);
+
+      if (!requestSnap.empty) {
+        const request = requestSnap.docs[0].data();
+        const statusText = document.createElement("p");
+        statusText.className = "small";
+        statusText.textContent = request.fromUid === currentUser.uid
+            ? "Friend request sent."
+            : "This user sent you a friend request.";
+        profileActions.appendChild(statusText);
+      } else {
+        const addFriendBtn = document.createElement("button");
+        addFriendBtn.textContent = "Add Friend";
+        addFriendBtn.onclick = () => sendFriendRequest(viewedProfileData.uid, addFriendBtn);
+        profileActions.appendChild(addFriendBtn);
+      }
     }
+  } catch (error) {
+    console.error("Failed to render visitor actions:", error);
+    profileActions.innerHTML = `<p class="small">Could not load actions.</p>`;
   }
 }
 
@@ -232,43 +225,33 @@ async function handleProfileSave() {
   const newBio = editBio.value.trim();
   const file = photoInput.files[0];
 
-  // --- Validation ---
   if (newUsername.length < 2 || newUsername.length > 30) {
     editMsg.textContent = "Username must be between 2 and 30 characters.";
     return;
   }
   
-  setButtonLoading(saveProfileBtn, true, "Save");
-  editMsg.textContent = "Checking username availability...";
+  setButtonLoading(saveProfileBtn, true, "Save Profile");
+  editMsg.textContent = "Checking username...";
   
-  // --- Check if username is taken ---
-  const unameQuery = query(collection(db, "users"), where("usernameLower", "==", newUsername.toLowerCase()));
-  const unameSnap = await getDocs(unameQuery);
-  const isTaken = !unameSnap.empty && unameSnap.docs[0].id !== currentUser.uid;
-  
-  if (isTaken) {
-    editMsg.textContent = "Username is already taken.";
-    setButtonLoading(saveProfileBtn, false, "Save Profile");
-    return;
-  }
-  
-  // --- Handle Photo Upload ---
-  let photoURL = viewedProfileData.photoURL; // Keep old photo by default
-  if (file) {
-    editMsg.textContent = "Uploading photo...";
-    try {
-      if (file.size > 5 * 1024 * 1024) throw new Error("File size exceeds 5MB.");
-      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Invalid file type.");
-      photoURL = await uploadProfileImage(file, currentUser.uid);
-    } catch (error) {
-      editMsg.textContent = `Photo upload failed: ${error.message}`;
+  try {
+    const unameQuery = query(collection(db, "users"), where("usernameLower", "==", newUsername.toLowerCase()));
+    const unameSnap = await getDocs(unameQuery);
+    const isTaken = !unameSnap.empty && unameSnap.docs[0].id !== currentUser.uid;
+    
+    if (isTaken) {
+      editMsg.textContent = "Username is already taken.";
       setButtonLoading(saveProfileBtn, false, "Save Profile");
       return;
     }
-  }
+    
+    let photoURL = viewedProfileData.photoURL;
+    if (file) {
+      editMsg.textContent = "Uploading photo...";
+      if (file.size > 5 * 1024 * 1024) throw new Error("File size exceeds 5MB.");
+      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Invalid file type.");
+      photoURL = await uploadProfileImage(file, currentUser.uid);
+    }
 
-  // --- Update Firestore & Auth Profile ---
-  try {
     editMsg.textContent = "Saving profile...";
     const userRef = doc(db, "users", currentUser.uid);
     await updateDoc(userRef, {
@@ -279,34 +262,27 @@ async function handleProfileSave() {
       updatedAt: serverTimestamp(),
     });
     
-    await updateAuthProfile(currentUser, {
-      displayName: newUsername,
-      photoURL: photoURL,
-    });
+    await updateAuthProfile(currentUser, { displayName: newUsername, photoURL });
     
     editMsg.textContent = "Profile saved successfully!";
-    photoInput.value = ""; // Clear file input
-    await loadProfilePage(currentUser.uid); // Reload profile to show changes
+    photoInput.value = "";
+    await loadProfilePage(currentUser.uid);
   } catch (error) {
     console.error("Profile save error:", error);
-    editMsg.textContent = "Failed to save profile. Please try again.";
+    editMsg.textContent = `Error: ${error.message}`;
   } finally {
     setButtonLoading(saveProfileBtn, false, "Save Profile");
   }
 }
 
-// --- Event Listeners for Edit Form ---
 saveProfileBtn?.addEventListener("click", handleProfileSave);
 
 photoInput?.addEventListener("change", () => {
   const file = photoInput.files[0];
-  if (file) {
-    editAvatarPreview.src = URL.createObjectURL(file);
-  }
+  if (file) editAvatarPreview.src = URL.createObjectURL(file);
 });
 
 cancelEditBtn?.addEventListener("click", () => {
-  // Reset form to its original state
   editUsername.value = viewedProfileData.username;
   editBio.value = viewedProfileData.bio;
   editAvatarPreview.src = viewedProfileData.photoURL || defaultAvatar();
@@ -314,14 +290,8 @@ cancelEditBtn?.addEventListener("click", () => {
   editMsg.textContent = "";
 });
 
-
 /* ---------- Part 5: Friend Actions ---------- */
 
-/**
- * Sends a friend request to the target user.
- * @param {string} targetUid The UID of the user to send a request to.
- * @param {HTMLButtonElement} btn The button that triggered the action.
- */
 async function sendFriendRequest(targetUid, btn) {
   setButtonLoading(btn, true, "Add Friend");
   try {
@@ -331,7 +301,6 @@ async function sendFriendRequest(targetUid, btn) {
       status: "pending",
       createdAt: serverTimestamp(),
     });
-    // Reload the actions to show "Request Sent"
     await renderVisitorView();
   } catch (error) {
     console.error("Friend request error:", error);
@@ -340,83 +309,72 @@ async function sendFriendRequest(targetUid, btn) {
   }
 }
 
-/**
- * Removes a friend mutually.
- * @param {string} friendUid The UID of the friend to remove.
- * @param {HTMLButtonElement} btn The button that triggered the action.
- */
 async function removeFriend(friendUid, btn) {
-  if (!confirm(`Are you sure you want to unfriend ${viewedProfileData.username}?`)) {
-    return;
-  }
+  if (!confirm(`Are you sure you want to unfriend ${viewedProfileData.username}?`)) return;
+
   setButtonLoading(btn, true, "Unfriend");
   try {
     const currentUserRef = doc(db, "users", currentUser.uid);
     const friendUserRef = doc(db, "users", friendUid);
     
-    // Use arrayRemove for atomic operations
     await updateDoc(currentUserRef, { friends: arrayRemove(friendUid) });
     await updateDoc(friendUserRef, { friends: arrayRemove(currentUser.uid) });
     
-    // Reload the actions to show the "Add Friend" button again
     await renderVisitorView();
   } catch (error) {
     console.error("Unfriend error:", error);
-    alert("Failed to remove friend. Please try again.");
+    alert("Failed to remove friend.");
     setButtonLoading(btn, false, "Unfriend");
   }
 }
 
-
 /* ---------- Part 6: Live Friends List ---------- */
 
-/**
- * Sets up a real-time listener for the current user's friends list.
- */
 function startFriendsListener() {
-  // Unsubscribe from any previous listener
   if (friendsListenerUnsubscribe) friendsListenerUnsubscribe();
 
   const userRef = doc(db, "users", currentUser.uid);
   friendsListenerUnsubscribe = onSnapshot(userRef, (docSnap) => {
     if (docSnap.exists()) {
-      const friendUids = docSnap.data().friends || [];
-      renderFriendsList(friendUids);
+      renderFriendsList(docSnap.data().friends || []);
     }
+  }, (error) => {
+    console.error("Friends listener error:", error);
+    friendsList.innerHTML = `<li class="small">Error loading friends.</li>`;
   });
 }
 
-/**
- * Fetches profile data for friend UIDs and renders them to the DOM.
- * @param {string[]} friendUids Array of friend UIDs.
- */
 async function renderFriendsList(friendUids) {
-  friendsList.innerHTML = ""; // Clear the list first
-
   if (friendUids.length === 0) {
-    friendsList.innerHTML = `<li class="small">You have no friends yet.</li>`;
+    friendsList.innerHTML = `<li class="small">You haven't added any friends yet.</li>`;
     return;
   }
+  
+  friendsList.innerHTML = `<li class="small">Loading friends...</li>`;
 
-  // Create a list of promises to fetch all friend profiles
-  const friendPromises = friendUids.map(uid => getDoc(doc(db, "users", uid)));
-  
-  const friendDocs = await Promise.all(friendPromises);
-  
-  friendDocs.forEach(docSnap => {
-    if (docSnap.exists()) {
-      const friend = { uid: docSnap.id, ...docSnap.data() };
-      const li = document.createElement("li");
-      li.className = "friend-item";
-      li.innerHTML = `
-        <img src="${friend.photoURL || defaultAvatar()}" alt="${friend.username}" />
-        <span>${friend.username || "Unknown"}</span>
-      `;
-      // Navigate to friend's profile on click
-      li.onclick = () => (window.location.href = `profile.html?uid=${friend.uid}`);
-      friendsList.appendChild(li);
-    }
-  });
+  try {
+    const friendPromises = friendUids.map(uid => getDoc(doc(db, "users", uid)));
+    const friendDocs = await Promise.all(friendPromises);
+    
+    friendsList.innerHTML = ""; // Clear loading message
+    
+    friendDocs.forEach(docSnap => {
+      if (docSnap.exists()) {
+        const friend = { uid: docSnap.id, ...docSnap.data() };
+        const li = document.createElement("li");
+        li.className = "friend-item";
+        li.innerHTML = `
+          <img src="${friend.photoURL || defaultAvatar()}" alt="${friend.username}" />
+          <span>${friend.username || "Unknown"}</span>
+        `;
+        li.onclick = () => (window.location.href = `profile.html?uid=${friend.uid}`);
+        friendsList.appendChild(li);
+      }
+    });
+  } catch (error) {
+    console.error("Failed to render friends list:", error);
+    friendsList.innerHTML = `<li class="small">Could not load friends list.</li>`;
+  }
 }
 
 // Automatically initialize the script when loaded
