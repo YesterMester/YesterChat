@@ -9,7 +9,7 @@
     body { font-family: Inter,system-ui,Arial; background:#f6f8fb; margin:0; color:#111; }
     .container { max-width:880px; margin:24px auto; padding:12px; }
     .profile-card { background:#fff; padding:18px; border-radius:12px; box-shadow:0 8px 20px rgba(10,20,40,0.04); border:1px solid #eee; }
-    .profile-avatar { width:160px; height:160px; border-radius:50%; object-fit:cover; display:block; margin:0 auto 12px; }
+    .profile-avatar { width:160px; height:160px; border-radius:50%; object-fit:cover; display:block; margin:0 auto 12px; cursor:pointer; }
     h1, h2 { margin:0; text-align:center; }
     .small { color:#666; font-size:0.9rem; }
     .bio { margin:10px 0 16px 0; text-align:center; color:#333; }
@@ -25,7 +25,6 @@
     #editMsg { color:#555; font-size:0.95rem; margin-top:6px; text-align:center; }
     .muted { color:#888; font-size:0.9rem; }
     a.link { color:#2f6cff; text-decoration:none; }
-    /* Friends list container */
     #friendsListContainer { margin-top:20px; background:#fafafa; padding:12px; border-radius:8px; border:1px solid #eee; }
     #friendsListContainer h3 { margin:0 0 8px 0; text-align:left; font-size:1rem; }
     #friendsList { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; list-style:none; padding:0; margin:0; }
@@ -38,15 +37,12 @@
   <div class="container">
     <div class="profile-card">
       <h1>User Profile</h1>
-
       <div style="display:flex; justify-content:center;">
         <img id="profileAvatar" src="https://www.gravatar.com/avatar/?d=mp&s=160" class="profile-avatar" alt="Profile Photo" />
       </div>
-
       <h2 id="profileUsername">Username</h2>
       <div class="small" id="profileEmail">email@example.com</div>
       <p id="profileBio" class="bio">This is your bio. It can be a few lines long.</p>
-
       <div id="profile-actions" class="profile-actions" aria-live="polite"></div>
 
       <div id="editArea" class="edit-area" style="display:none;">
@@ -84,6 +80,36 @@
     </div>
   </div>
 
-  <script type="module" src="profile.js"></script>
+  <script type="module">
+    import { 
+      initAuthListener, 
+      fetchFriends, 
+      getCurrentUser 
+    } from './profile.js';
+
+    initAuthListener();
+
+    // Render live friends list
+    function updateFriendListUI(friendsArr) {
+      const list = document.getElementById('friendsList');
+      list.innerHTML = '';
+      friendsArr.forEach(friend => {
+        const li = document.createElement('li');
+        li.className = 'friend-item';
+        li.innerHTML = `
+          <img src="${friend.photoURL || 'https://www.gravatar.com/avatar/?d=mp&s=160'}" alt="${friend.username}" />
+          <span>${friend.username || 'Unknown'}</span>
+        `;
+        li.addEventListener('click', () => {
+          if (friend.uid) window.location.href = `profile.html?uid=${friend.uid}`;
+        });
+        list.appendChild(li);
+      });
+    }
+
+    // Initial fetch and live updates
+    const currentUser = getCurrentUser();
+    if (currentUser) fetchFriends(updateFriendListUI);
+  </script>
 </body>
 </html>
