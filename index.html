@@ -1,184 +1,128 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Yester Chat</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="style.css" />
-  <style>
-    :root{
-      --bg:#f6f8fb;
-      --panel:#ffffff;
-      --muted:#6b7280;
-      --accent:#2f6cff;
-      --accent-600:#2657e6;
-      --topbar-contrast:#0b5fff;
-      --surface-border: #e6e9ef;
-    }
-
-    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial,Helvetica,sans-serif;background:var(--bg);color:#0f172a;}
-    /* TOPBAR */
-    #topbar{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      padding:10px 18px;
-      background: linear-gradient(90deg,var(--topbar-contrast), var(--accent));
-      color:#fff;
-      border-bottom:1px solid rgba(0,0,0,0.06);
-      position:sticky;
-      top:0;
-      z-index:40;
-    }
-
-    .topbar-left{display:flex;gap:12px;align-items:center;}
-    #brand{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      color: #fff;
-      text-decoration:none;
-    }
-    #brand .logo {
-      width:40px;height:40px;border-radius:8px;background:rgba(255,255,255,0.12);display:inline-flex;align-items:center;justify-content:center;font-weight:700;
-      color:#fff;font-size:18px;
-    }
-    #brand h1{font-size:18px;margin:0;color:#fff;}
-
-    /* me preview (avatar + name + profile button) */
-    #mePreview{display:flex;align-items:center;gap:10px;}
-    #mePreview img.avatar-small{
-      width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.18);
-      background:rgba(255,255,255,0.03);
-    }
-    #meName{font-weight:600;color:#fff;font-size:15px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;}
-
-    /* topbar buttons — transparent on gradient background */
-    .topbar-btn{
-      -webkit-appearance:none;
-      appearance:none;
-      border:1px solid rgba(255,255,255,0.18);
-      background:transparent;
-      color:#fff;
-      padding:8px 10px;
-      border-radius:10px;
-      cursor:pointer;
-      font-weight:600;
-      font-size:14px;
-    }
-    .topbar-btn:hover{ background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.28); }
-    .topbar-btn.primary{
-      background:#fff;
-      color:var(--accent-600);
-      border-color: rgba(0,0,0,0.06);
-    }
-    .topbar-btn.primary:hover{ background: #f4f6ff; }
-
-    /* LAYOUT: wrapper under topbar */
-    .app-shell{ max-width:1100px; margin:20px auto; padding:0 14px; display:flex; gap:16px; align-items:flex-start; }
-    .friends-container{ width:260px; flex:0 0 260px; }
-    .card{ background:var(--panel); padding:14px; border-radius:12px; border:1px solid var(--surface-border); box-shadow:0 6px 18px rgba(12,20,40,0.03); }
-
-    .chat-column{ flex:1; display:flex; flex-direction:column; gap:12px; min-width:0; }
-    .chat-box{ background:var(--panel); border-radius:10px; border:1px solid var(--surface-border); height:520px; overflow:auto; padding:12px; }
-    .composer{ display:flex; gap:8px; align-items:center; margin-top:6px; }
-    #msgInput{ flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--surface-border); font-size:15px; }
-    #sendBtn{ padding:10px 14px; border-radius:10px; border:none; background:var(--accent); color:white; cursor:pointer; font-weight:600; }
-
-    .avatar-small{ width:36px;height:36px;border-radius:50%;object-fit:cover; }
-    .friend-item{ display:flex;gap:10px;align-items:center;padding:8px;border-radius:8px;cursor:pointer; }
-    .friend-item:hover{ background:#fbfbff; }
-    .friend-avatar{ width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid #eee; }
-
-    .message-row{ display:flex; gap:10px; align-items:flex-start; margin-bottom:12px; }
-    .message-content .message-meta{ font-size:13px; color:#0f172a; font-weight:700; margin-bottom:6px; }
-    .message-text{ background:#f7f9ff; padding:10px 12px; border-radius:8px; display:inline-block; color:#0f172a; }
-
-    .small{ color:var(--muted); font-size:0.9rem; }
-
-    /* responsive */
-    @media (max-width:900px){
-      .app-shell{ flex-direction:column; padding:12px; }
-      .friends-container{ width:100%; order:2; }
-      .chat-column{ order:1; }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yester Chat</title>
+    <style>
+        /* Basic styling for debugging */
+        .hidden { display: none !important; }
+        .avatar-small { width: 32px; height: 32px; border-radius: 50%; }
+        .friend-item { cursor: pointer; padding: 8px; border: 1px solid #ddd; margin: 4px; }
+        .friend-request-row { display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; margin: 4px; }
+        #chat { height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
+        #msgInput { width: 70%; padding: 8px; }
+        #sendBtn { padding: 8px 16px; }
+        .small { font-size: 0.9em; color: #666; padding: 8px; }
+        
+        /* Layout */
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .topbar { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #ddd; }
+        .main-content { display: flex; gap: 20px; margin-top: 20px; }
+        .sidebar { width: 300px; }
+        .chat-area { flex: 1; }
+        .section { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 5px; }
+    </style>
 </head>
 <body>
-
-  <!-- TOPBAR -->
-  <div id="topbar">
-    <div class="topbar-left">
-      <a id="brand" href="index.html" aria-label="Yester Chat home">
-        <div class="logo">YC</div>
-        <h1>Yester Chat</h1>
-      </a>
-
-      <!-- Current User Preview (hidden until signed in) -->
-      <div id="mePreview" style="display:none;">
-        <img id="meAvatarSmall" src="" class="avatar-small" alt="Your avatar" />
-        <span id="meName">Your name</span>
-      </div>
-    </div>
-
-    <!-- Auth Controls -->
-    <div id="authButtons">
-      <button id="authBtn" class="topbar-btn">Sign In / Sign Up</button>
-      <button id="myProfileBtn" class="topbar-btn primary" style="display:none;">My Profile</button>
-      <button id="logoutBtn" class="topbar-btn" style="display:none;">Logout</button>
-    </div>
-  </div>
-
-  <!-- MAIN SHELL -->
-  <div class="app-shell">
-
-    <!-- FRIENDS -->
-    <aside id="friendsContainer" class="friends-container" style="display:none;">
-      <div class="card">
-        <h3 style="margin:0 0 8px 0">Friends</h3>
-        <ul id="friendsList" style="list-style:none;padding:0;margin:0;"></ul>
-        <hr style="margin:12px 0" />
-        <h4 style="margin:0 0 8px 0">Incoming Requests</h4>
-        <div id="friendRequests" class="small">No incoming requests</div>
-      </div>
-    </aside>
-
-    <!-- CHAT -->
-    <main class="chat-column" style="width:100%">
-      <div class="card" style="display:flex;justify-content:space-between;align-items:center;">
-        <h2 style="margin:0">Yester Chat</h2>
-        <div id="signedOutNotice" class="small">Not signed in — you will be redirected shortly.</div>
-      </div>
-
-      <section id="chatContainer" class="card" style="display:none;">
-        <div id="chatBox" class="chat-box" aria-live="polite"></div>
-        <div class="composer">
-          <input id="msgInput" type="text" placeholder="Type a message…" autocomplete="off" />
-          <button id="sendBtn">Send</button>
+    <!-- Top Navigation Bar -->
+    <div class="topbar">
+        <!-- User Profile Preview (shown when signed in) -->
+        <div id="mePreview" style="display: none;">
+            <img id="meAvatarSmall" src="" alt="Your Avatar" class="avatar-small">
+            <span id="meName">Your Name</span>
         </div>
-      </section>
-    </main>
-  </div>
-
-  <!-- Templates -->
-  <template id="chatMessageTemplate">
-    <div class="message-row">
-      <img class="avatar" src="" width="40" height="40" style="border-radius:50%;object-fit:cover;border:1px solid #eee" />
-      <div class="message-content">
-        <div class="message-meta"><span class="sender-name"></span> <span class="small time"></span></div>
-        <div class="message-text"></div>
-      </div>
+        
+        <!-- Auth Buttons -->
+        <div>
+            <button id="myProfileBtn" style="display: none;">My Profile</button>
+            <button id="authBtn" style="display: inline-block;">Sign In / Sign Up</button>
+            <button id="logoutBtn" style="display: none;">Logout</button>
+        </div>
     </div>
-  </template>
 
-  <template id="friendItemTemplate">
-    <li class="friend-item">
-      <img class="friend-avatar avatar-small" src="" alt="Avatar" />
-      <span class="friend-name" data-uid=""></span>
-    </li>
-  </template>
+    <div class="container">
+        <!-- Signed Out Notice -->
+        <div id="signedOutNotice" style="display: none;">
+            <h2>Welcome to Yester Chat</h2>
+            <p>Please sign in to access the chat and connect with friends.</p>
+            <p>You will be redirected to the login page shortly...</p>
+        </div>
 
-  <script type="module" src="./script.js"></script>
+        <div class="main-content">
+            <!-- Sidebar: Friends & Requests -->
+            <div class="sidebar">
+                <!-- Friends Container -->
+                <div id="friendsContainer" style="display: none;">
+                    <div class="section">
+                        <h3>Friends</h3>
+                        <div id="friendsList">
+                            <div class="small">Loading friends...</div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Friend Requests</h3>
+                        <div id="friendRequests">
+                            <div class="small">Loading requests...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Chat Area -->
+            <div class="chat-area">
+                <div id="chatContainer" style="display: none;">
+                    <div class="section">
+                        <h3>Global Chat</h3>
+                        <div id="chat"></div>
+                        <div style="margin-top: 10px;">
+                            <input type="text" id="msgInput" placeholder="Type your message..." />
+                            <button id="sendBtn">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Templates (hidden) -->
+    <template id="chatMessageTemplate">
+        <div class="chat-message" style="margin-bottom: 10px; padding: 8px; border-bottom: 1px solid #eee;">
+            <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                <img class="avatar" src="" alt="Avatar" class="avatar-small" style="margin-right: 8px;">
+                <span class="sender-name" style="font-weight: bold; margin-right: 10px;"></span>
+                <span class="time" style="font-size: 0.8em; color: #666;"></span>
+            </div>
+            <div class="message-text" style="margin-left: 40px;"></div>
+        </div>
+    </template>
+
+    <template id="friendItemTemplate">
+        <div class="friend-item" style="display: flex; align-items: center; padding: 8px; cursor: pointer; border: 1px solid #ddd; margin: 2px; border-radius: 3px;">
+            <img class="friend-avatar" src="" alt="Friend Avatar" class="avatar-small" style="margin-right: 8px;">
+            <span class="friend-name"></span>
+        </div>
+    </template>
+
+    <!-- Debug Info (remove in production) -->
+    <div id="debugInfo" style="position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px; font-size: 12px; max-width: 300px;">
+        <div>Page: index.html</div>
+        <div>Status: <span id="debugStatus">Loading...</span></div>
+        <button onclick="window.debugScript?.forceUIUpdate()" style="margin-top: 5px; padding: 2px 5px;">Force UI Update</button>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module" src="script.js"></script>
+
+    <script>
+        // Update debug status
+        setTimeout(() => {
+            const statusEl = document.getElementById('debugStatus');
+            if (statusEl) {
+                statusEl.textContent = window.auth?.currentUser ? 'Signed In' : 'Signed Out';
+            }
+        }, 2000);
+    </script>
 </body>
 </html>
