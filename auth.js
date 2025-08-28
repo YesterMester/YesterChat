@@ -32,11 +32,9 @@ signupBtn?.addEventListener("click", async () => {
   signupMsg.style.color = "black";
 
   try {
-    // 1. Create the user in Firebase Auth
     const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
     const user = userCredential.user;
 
-    // 2. Create the user's profile document in Firestore
     await setDoc(doc(db, "users", user.uid), {
       username: username,
       usernameLower: username.toLowerCase(),
@@ -50,10 +48,10 @@ signupBtn?.addEventListener("click", async () => {
     signupMsg.textContent = "✅ Account created successfully! Redirecting...";
     signupMsg.style.color = "green";
     
-    // Redirect to the main page after a successful sign-up
     setTimeout(() => window.location.href = "index.html", 1000);
 
   } catch (err) {
+    // This part of the code correctly displays the sign-up error from Firebase
     signupMsg.textContent = `❌ ${err.message}`;
     signupMsg.style.color = "red";
     console.error("Sign up error:", err);
@@ -79,14 +77,14 @@ signinBtn?.addEventListener("click", async () => {
 
   try {
     await signInWithEmailAndPassword(auth, email, pass);
-    
+
     signinMsg.textContent = "✅ Logged in successfully! Redirecting...";
     signinMsg.style.color = "green";
     
-    // Redirect to the main page after a successful sign-in
     setTimeout(() => window.location.href = "index.html", 500);
 
   } catch (err) {
+    // This part of the code correctly displays the login error from Firebase
     signinMsg.textContent = `❌ ${err.message}`;
     signinMsg.style.color = "red";
     console.error("Sign in error:", err);
