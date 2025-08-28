@@ -6,12 +6,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
   <style>
-    /* small inline helpers so profile looks good even before CSS update */
     body { font-family: Inter,system-ui,Arial; background:#f6f8fb; margin:0; color:#111; }
     .container { max-width:880px; margin:24px auto; padding:12px; }
     .profile-card { background:#fff; padding:18px; border-radius:12px; box-shadow:0 8px 20px rgba(10,20,40,0.04); border:1px solid #eee; }
     .profile-avatar { width:160px; height:160px; border-radius:50%; object-fit:cover; display:block; margin:0 auto 12px; }
-    h1 { margin:0 0 8px 0; text-align:center; }
+    h1, h2 { margin:0; text-align:center; }
     .small { color:#666; font-size:0.9rem; }
     .bio { margin:10px 0 16px 0; text-align:center; color:#333; }
     .profile-actions { display:flex; gap:8px; justify-content:center; margin-top:12px; flex-wrap:wrap; }
@@ -26,57 +25,57 @@
     #editMsg { color:#555; font-size:0.95rem; margin-top:6px; text-align:center; }
     .muted { color:#888; font-size:0.9rem; }
     a.link { color:#2f6cff; text-decoration:none; }
+    /* Friends list container */
+    #friendsListContainer { margin-top:20px; background:#fafafa; padding:12px; border-radius:8px; border:1px solid #eee; }
+    #friendsListContainer h3 { margin:0 0 8px 0; text-align:left; font-size:1rem; }
+    #friendsList { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; list-style:none; padding:0; margin:0; }
+    .friend-item { display:flex; flex-direction:column; align-items:center; width:80px; cursor:pointer; }
+    .friend-item img { width:64px; height:64px; border-radius:50%; object-fit:cover; }
+    .friend-item span { font-size:0.85rem; margin-top:4px; text-align:center; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="profile-card">
-      <h1>Profile</h1>
+      <h1>User Profile</h1>
 
-      <!-- Avatar & preview -->
       <div style="display:flex; justify-content:center;">
         <img id="profileAvatar" src="https://www.gravatar.com/avatar/?d=mp&s=160" class="profile-avatar" alt="Profile Photo" />
       </div>
 
-      <!-- Username & email -->
-      <h2 id="profileUsername" style="text-align:center; margin:8px 0;">Username</h2>
-      <div style="text-align:center;" class="small" id="profileEmail">email@example.com</div>
-
-      <!-- Bio -->
+      <h2 id="profileUsername">Username</h2>
+      <div class="small" id="profileEmail">email@example.com</div>
       <p id="profileBio" class="bio">This is your bio. It can be a few lines long.</p>
 
-      <!-- Actions area (Add friend / Accept / Edit / Unfriend) -->
-      <div id="profile-actions" class="profile-actions" aria-live="polite">
-        <!-- Buttons are injected by profile.js based on relationship and ownership -->
-      </div>
+      <div id="profile-actions" class="profile-actions" aria-live="polite"></div>
 
-      <!-- Edit area — only shown to the profile owner -->
-      <div id="editArea" class="edit-area" style="display:none; margin-top:18px;">
+      <div id="editArea" class="edit-area" style="display:none;">
         <div class="row">
           <div class="left">
             <div class="muted">Current avatar</div>
             <img id="editAvatarPreview" src="https://www.gravatar.com/avatar/?d=mp&s=160" style="width:96px;height:96px;border-radius:50%;object-fit:cover;margin-top:8px;" alt="Preview" />
             <div class="muted" style="margin-top:8px;font-size:0.85rem;">Square images look best.</div>
           </div>
-
           <div class="right">
             <label for="editUsername" class="small">Username</label>
             <input id="editUsername" type="text" placeholder="Your username (unique)" />
-
             <label for="editBio" class="small">Bio</label>
             <textarea id="editBio" rows="4" placeholder="Write a short bio..."></textarea>
-
             <label for="photoInput" class="small">Change photo</label>
             <input id="photoInput" class="file-input" type="file" accept="image/*" />
-
             <div style="display:flex; gap:8px; margin-top:10px;">
               <button id="saveProfileBtn" class="primary">Save Profile</button>
               <button id="cancelEditBtn">Cancel</button>
             </div>
-
             <div id="editMsg" class="muted"></div>
           </div>
         </div>
+      </div>
+
+      <!-- Friends list -->
+      <div id="friendsListContainer">
+        <h3>Friends</h3>
+        <ul id="friendsList"></ul>
       </div>
 
       <div style="margin-top:18px; text-align:center;">
