@@ -1,5 +1,4 @@
-// script.js — fully combined & fixed for friend requests and Firestore permissions
-
+// script.js — combined, fixed friend-request flow, outgoing listener to apply accepted requests safely
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import {
@@ -18,7 +17,7 @@ import {
   arrayUnion
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
-import { uploadProfileImage } from "./cloudinary.js";
+import { uploadProfileImage } from "./cloudinary.js"; // still needed by profile page
 
 /* ===== DOM elements ===== */
 const mePreview = document.getElementById("mePreview");
@@ -44,7 +43,7 @@ const friendItemTemplate = document.getElementById("friendItemTemplate");
 
 /* ===== State ===== */
 let authChecked = false;
-let unsubscriptions = { chat: null, userDoc: null, requests: null };
+let unsubscriptions = { chat: null, userDoc: null, incomingRequests: null, outgoingRequests: null };
 const profileCache = {}; // uid -> profile data cache
 
 /* ===== Helpers ===== */
@@ -101,10 +100,16 @@ async function ensureMyUserDoc(user) {
   }
 }
 
-/* Generate predictable friend request ID */
-function getFriendRequestId(fromUid, toUid) {
-  const [a, b] = [fromUid, toUid].sort();
-  return `${a}_${b}`;
+/* Cleanup realtime listeners */
+function cleanupRealtime() {
+  Object.keys(unsubscriptions).forEach(k => {
+    try { unsubscriptions[k]?.(); } catch (e) {}
+    unsubscriptions[k] = null;
+  });
+  // clear UI sections
+  if (chatBox) chatBox.innerHTML = "";
+  if (friendsList) friendsList.innerHTML = "";
+  if (friendRequestsContainer) friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
 }
 
 /* ===== Auth State Handling ===== */
@@ -113,6 +118,7 @@ onAuthStateChanged(auth, async (user) => {
   console.log("Auth state changed:", user ? user.uid : null);
 
   if (!user) {
+    // Signed out: hide profile controls & show auth button
     if (mePreview) mePreview.style.display = "none";
     if (myProfileBtn) { myProfileBtn.style.display = "none"; myProfileBtn.onclick = null; }
     if (logoutBtn) logoutBtn.style.display = "none";
@@ -123,6 +129,7 @@ onAuthStateChanged(auth, async (user) => {
 
     cleanupRealtime();
 
+    // friendly redirect to auth page after 8s (as your original UX did)
     setTimeout(() => {
       if (!auth.currentUser) window.location.replace("auth.html");
     }, 8000);
@@ -130,6 +137,7 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
 
+  // Signed in
   try {
     await ensureMyUserDoc(user);
 
@@ -145,9 +153,11 @@ onAuthStateChanged(auth, async (user) => {
     if (friendsContainer) friendsContainer.style.display = "block";
     if (chatContainer) chatContainer.style.display = "block";
 
+    // start listeners
     startUserDocListener(user);
     startChatListener(user);
     startIncomingRequestsListener(user);
+    startOutgoingRequestsListener(user);
   } catch (err) {
     console.error("Post-auth initialization error:", err);
   }
@@ -231,19 +241,21 @@ function startChatListener(user) {
     }
   });
 
+  // name/avatar click -> profile
   chatBox.addEventListener("click", (ev) => {
     const t = ev.target;
     const uid = t.getAttribute?.("data-uid") || t.closest?.("[data-uid]")?.getAttribute("data-uid");
     if (uid) openProfile(uid);
   });
 
+  // send messages
   if (sendBtn) {
     sendBtn.onclick = async () => {
       const text = (msgInput && msgInput.value || "").trim();
       if (!text) return;
       if (!auth.currentUser) return alert("You must be signed in to send messages.");
       try {
-        await fetchProfile(auth.currentUser.uid); 
+        await fetchProfile(auth.currentUser.uid); // ensure cached
         const me = profileCache[auth.currentUser.uid] || {};
         await addDoc(collection(db, "servers", "defaultServer", "messages"), {
           text,
@@ -270,10 +282,16 @@ function startChatListener(user) {
   }
 }
 
-/* ===== Incoming friend requests ===== */
+/* ===== Incoming friend requests (what the current user receives) =====
+   Accept flow:
+     - Update the friendRequests doc to status 'accepted' (allowed)
+     - Add the sender UID to the current user's (acceptor) friends array (allowed)
+     - DON'T update the other user's users/{uid} doc here (that caused permission errors)
+   The sender's client listens to their outgoing requests and will add the acceptor to their own friends list when they see the request accepted.
+*/
 function startIncomingRequestsListener(user) {
   if (!user || !friendRequestsContainer) return;
-  if (unsubscriptions.requests) return;
+  if (unsubscriptions.incomingRequests) return;
 
   const q = query(
     collection(db, "friendRequests"),
@@ -281,7 +299,7 @@ function startIncomingRequestsListener(user) {
     where("status", "==", "pending")
   );
 
-  unsubscriptions.requests = onSnapshot(q, async snapshot => {
+  unsubscriptions.incomingRequests = onSnapshot(q, async snapshot => {
     try {
       friendRequestsContainer.innerHTML = "";
       if (snapshot.empty) {
@@ -306,30 +324,40 @@ function startIncomingRequestsListener(user) {
         const decline = document.createElement("button");
         decline.textContent = "Decline";
 
+        // Accept friend request (recipient action)
         accept.addEventListener("click", async (ev) => {
           ev.stopPropagation();
           try {
-            // Update friend request status
-            await updateDoc(doc(db, "friendRequests", d.id), { status: "accepted", respondedAt: serverTimestamp() });
+            // 1) update the friendRequests doc to accepted
+            await updateDoc(doc(db, "friendRequests", d.id), {
+              status: "accepted",
+              respondedAt: serverTimestamp(),
+              acceptedBy: user.uid // optional helpful metadata
+            });
 
-            // Update both users' friends arrays
+            // 2) add the sender to current user's friends array (allowed)
             const meRef = doc(db, "users", user.uid);
-            const themRef = doc(db, "users", fromUid);
             await updateDoc(meRef, { friends: arrayUnion(fromUid) });
-            await updateDoc(themRef, { friends: arrayUnion(user.uid) });
+
+            // UI will update from user doc snapshot listener
           } catch (err) {
             console.error("Accept failed", err);
-            alert("Accept failed. Check permissions and Firestore rules.");
+            // This indicates a Firestore permission issue or network error.
+            alert("Accept failed. Check console for details.");
           }
         });
 
+        // Decline friend request (recipient action)
         decline.addEventListener("click", async (ev) => {
           ev.stopPropagation();
           try {
-            await updateDoc(doc(db, "friendRequests", d.id), { status: "declined", respondedAt: serverTimestamp() });
+            await updateDoc(doc(db, "friendRequests", d.id), {
+              status: "declined",
+              respondedAt: serverTimestamp()
+            });
           } catch (err) {
             console.error("Decline failed", err);
-            alert("Decline failed. Check permissions and Firestore rules.");
+            alert("Decline failed. Check console for details.");
           }
         });
 
@@ -349,6 +377,48 @@ function startIncomingRequestsListener(user) {
   }, err => {
     console.error("Requests onSnapshot error:", err);
     friendRequestsContainer.innerHTML = "<div class='small' style='color:crimson'>Permission error loading requests</div>";
+  });
+}
+
+/* ===== Outgoing friend requests listener (for the sender) =====
+   Purpose: When someone you sent a request to accepts it (status -> 'accepted'), your client sees it,
+   then your client updates *your* users/{yourUid}.friends array (allowed) and marks the friendRequest as processed.
+*/
+function startOutgoingRequestsListener(user) {
+  if (!user) return;
+  if (unsubscriptions.outgoingRequests) return;
+
+  const q = query(
+    collection(db, "friendRequests"),
+    where("fromUid", "==", user.uid),
+    where("status", "==", "accepted")
+  );
+
+  unsubscriptions.outgoingRequests = onSnapshot(q, async snapshot => {
+    try {
+      if (snapshot.empty) return;
+      for (const d of snapshot.docs) {
+        const data = d.data();
+        const toUid = data.toUid;
+        // Skip if we've already processed this acceptance
+        if (data.processed === true) continue;
+
+        try {
+          // Add the accepter (toUid) to my friends array (I am the sender, allowed)
+          const myRef = doc(db, "users", user.uid);
+          await updateDoc(myRef, { friends: arrayUnion(toUid) });
+
+          // Mark request as processed so we don't apply again
+          await updateDoc(doc(db, "friendRequests", d.id), { processed: true, processedAt: serverTimestamp() });
+        } catch (err) {
+          console.error("Outgoing request processing failed for", d.id, err);
+        }
+      }
+    } catch (err) {
+      console.error("Outgoing requests snapshot error:", err);
+    }
+  }, err => {
+    console.error("Outgoing requests onSnapshot error:", err);
   });
 }
 
@@ -420,10 +490,59 @@ function startUserDocListener(user) {
   });
 }
 
-/* ===== Cleanup realtime listeners ===== */
-function cleanupRealtime() {
-  Object.values(unsubscriptions).forEach(unsub => unsub?.());
-  unsubscriptions = { chat: null, userDoc: null, requests: null };
+/* ===== Utility helper: check for existing pending requests (avoid duplicates) ===== */
+async function hasExistingPendingRequestBetween(aUid, bUid) {
+  // check either direction for a pending request
+  try {
+    const q1 = query(collection(db, "friendRequests"), where("fromUid", "==", aUid), where("toUid", "==", bUid), where("status", "==", "pending"));
+    const q2 = query(collection(db, "friendRequests"), where("fromUid", "==", bUid), where("toUid", "==", aUid), where("status", "==", "pending"));
+    const [r1, r2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+    return !r1.empty || !r2.empty;
+  } catch (err) {
+    console.error("hasExistingPendingRequestBetween error", err);
+    return false;
+  }
+}
+
+/* ===== Setup visitor actions used on profile page (keeps original behavior but avoids duplicates) =====
+   NOTE: your profile.js also creates friend requests — keep it consistent with this behavior.
+*/
+async function setupVisitorActionsFromIndex(uid) {
+  // This function is provided if you want to reuse visitor logic in index.html context.
+  // For profile.js you already have a similar implementation; this is just to show consistent safe create.
+  if (!auth.currentUser) return;
+  const currentUid = auth.currentUser.uid;
+
+  // non-blocking example of sending a request
+  if (currentUid === uid) return;
+
+  const alreadyFriendsSnap = await getDoc(doc(db, "users", currentUid));
+  const myFriends = alreadyFriendsSnap.exists() ? (alreadyFriendsSnap.data().friends || []) : [];
+  if (Array.isArray(myFriends) && myFriends.includes(uid)) {
+    alert("Already friends.");
+    return;
+  }
+
+  // guard duplicates
+  const existsPending = await hasExistingPendingRequestBetween(currentUid, uid);
+  if (existsPending) {
+    alert("A pending friend request already exists between you and this user.");
+    return;
+  }
+
+  // create request
+  try {
+    await addDoc(collection(db, "friendRequests"), {
+      fromUid: currentUid,
+      toUid: uid,
+      status: "pending",
+      createdAt: serverTimestamp()
+    });
+    alert("Friend request sent.");
+  } catch (err) {
+    console.error("Failed to send friend request", err);
+    alert("Failed to send friend request. See console.");
+  }
 }
 
 /* ===== Safety fallback redirect ===== */
@@ -434,4 +553,4 @@ setTimeout(() => {
   }
 }, 10000);
 
-console.log("script.js loaded — topbar controls, chat, and friends listeners are active.");
+console.log("script.js loaded — topbar controls, chat, friends and friend-request listeners active.");
