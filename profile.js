@@ -1,14 +1,9 @@
 /*
  * =========================================================================================
- * YESTER CHAT: PROFILE.JS (FINAL REVISION)
+ * YESTER CHAT: PROFILE.JS (Using Firebase v12.1.0)
  * =========================================================================================
  * This script manages user profiles, editing, friend requests, and friend lists.
- *
- * Key Fixes & Improvements:
- * 1.  **Critical Import Check:** Added an explicit check to ensure the `auth` and `db`
- * objects from firebase.js are valid. This will catch any export/import issues
- * immediately and provide a clear console error.
- * 2.  **Error Handling:** Retains robust try...catch blocks for all async operations.
+ * It has been updated to use the latest Firebase SDK version for full compatibility.
  * =========================================================================================
  */
 
@@ -29,11 +24,11 @@ import {
   getDocs,
   onSnapshot,
   arrayRemove,
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import {
   onAuthStateChanged,
   updateProfile as updateAuthProfile,
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 
 // --- DOM Elements ---
 const profileAvatar = document.getElementById("profileAvatar");
@@ -71,8 +66,6 @@ function setButtonLoading(btn, isLoading, text = "Save") {
 /* ---------- Part 3: Core Logic & Profile Rendering ---------- */
 
 export function initAuthListener() {
-  // **CRITICAL FIX:** Check if Firebase services are imported correctly.
-  // If `db` is undefined, the error you're seeing will occur.
   if (!auth || !db) {
     console.error(
       "Firebase FATAL ERROR: The 'auth' or 'db' object is not being imported correctly from firebase.js. Please check your firebase.js file to ensure you are exporting 'auth' and 'db' properly."
