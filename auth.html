@@ -2,33 +2,629 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Yester Chat - Auth</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yester Chat - Authentication</title>
   <link rel="stylesheet" href="style.css">
+  <style>
+    /* Enhanced responsive styles for auth page */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      line-height: 1.6;
+    }
+
+    .auth-container {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+      padding: 40px;
+      width: 100%;
+      max-width: 480px;
+      animation: slideUp 0.6s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .auth-container h1 {
+      text-align: center;
+      color: #333;
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .auth-subtitle {
+      text-align: center;
+      color: #666;
+      font-size: 1rem;
+      margin-bottom: 40px;
+      font-weight: 400;
+    }
+
+    .auth-tabs {
+      display: flex;
+      margin-bottom: 30px;
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 4px;
+    }
+
+    .auth-tab {
+      flex: 1;
+      background: transparent;
+      border: none;
+      padding: 12px 16px;
+      cursor: pointer;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      color: #666;
+    }
+
+    .auth-tab.active {
+      background: white;
+      color: #333;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .auth-tab:hover {
+      color: #333;
+    }
+
+    .auth-form {
+      display: none;
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    .auth-form.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 16px 20px;
+      border: 2px solid #e1e5e9;
+      border-radius: 12px;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+      background: #fff;
+      outline: none;
+    }
+
+    .form-input:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .form-input:invalid:not(:placeholder-shown) {
+      border-color: #e74c3c;
+    }
+
+    .form-input:valid:not(:placeholder-shown) {
+      border-color: #27ae60;
+    }
+
+    .input-icon {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #999;
+      pointer-events: none;
+      font-size: 1.2rem;
+    }
+
+    .form-button {
+      width: 100%;
+      padding: 16px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .form-button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+    }
+
+    .form-button:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .form-button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .form-button .loading-spinner {
+      display: none;
+      width: 20px;
+      height: 20px;
+      border: 2px solid transparent;
+      border-top: 2px solid white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 10px;
+    }
+
+    .form-button.loading .loading-spinner {
+      display: inline-block;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .message {
+      margin-top: 15px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-weight: 500;
+      text-align: center;
+      min-height: 20px;
+      transition: all 0.3s ease;
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+
+    .message.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .form-footer {
+      margin-top: 30px;
+      text-align: center;
+      color: #666;
+      font-size: 0.9rem;
+    }
+
+    .form-footer a {
+      color: #667eea;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .form-footer a:hover {
+      text-decoration: underline;
+    }
+
+    .password-requirements {
+      font-size: 0.8rem;
+      color: #666;
+      margin-top: 8px;
+      padding-left: 12px;
+    }
+
+    .requirement {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .requirement-icon {
+      margin-right: 8px;
+      font-size: 0.7rem;
+    }
+
+    .requirement.valid .requirement-icon {
+      color: #27ae60;
+    }
+
+    .requirement.invalid .requirement-icon {
+      color: #e74c3c;
+    }
+
+    /* Mobile responsiveness */
+    @media (max-width: 768px) {
+      body {
+        padding: 10px;
+      }
+
+      .auth-container {
+        padding: 30px 20px;
+        margin: 10px;
+        border-radius: 16px;
+      }
+
+      .auth-container h1 {
+        font-size: 2rem;
+      }
+
+      .form-input {
+        padding: 14px 16px;
+        font-size: 16px; /* Prevents zoom on iOS */
+      }
+
+      .form-button {
+        padding: 14px;
+        font-size: 1rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .auth-container {
+        padding: 20px 15px;
+      }
+
+      .auth-container h1 {
+        font-size: 1.8rem;
+      }
+
+      .auth-tabs {
+        margin-bottom: 20px;
+      }
+
+      .auth-tab {
+        padding: 10px 12px;
+        font-size: 0.9rem;
+      }
+    }
+
+    /* Loading state */
+    .auth-container.loading {
+      pointer-events: none;
+      opacity: 0.7;
+    }
+
+    /* Connection status indicator */
+    .connection-status {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 8px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      z-index: 1000;
+      transition: all 0.3s ease;
+    }
+
+    .connection-status.online {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .connection-status.offline {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .connection-status.checking {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+  </style>
 </head>
 <body>
-  <div class="auth-container">
-    <h1>Yester Chat</h1>
+  <div class="connection-status checking" id="connectionStatus">
+    Checking connection...
+  </div>
 
-    <!-- SIGNUP FORM -->
-    <div class="auth-box">
-      <h2>Sign Up</h2>
-      <input type="text" id="signup-username" placeholder="Username" required>
-      <input type="email" id="signup-email" placeholder="Email" required>
-      <input type="password" id="signup-pass" placeholder="Password" required>
-      <button id="signup-btn">Sign Up</button>
-      <p id="signup-msg"></p>
+  <div class="auth-container" id="authContainer">
+    <h1>Yester Chat</h1>
+    <p class="auth-subtitle">Connect with friends in real-time</p>
+
+    <!-- Tab Navigation -->
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="signin">Sign In</button>
+      <button class="auth-tab" data-tab="signup">Sign Up</button>
     </div>
 
-    <!-- SIGNIN FORM -->
-    <div class="auth-box">
-      <h2>Sign In</h2>
-      <input type="email" id="signin-email" placeholder="Email" required>
-      <input type="password" id="signin-pass" placeholder="Password" required>
-      <button id="signin-btn">Sign In</button>
-      <p id="signin-msg"></p>
+    <!-- Sign In Form -->
+    <form class="auth-form active" id="signin-form" novalidate>
+      <div class="form-group">
+        <input 
+          type="email" 
+          id="signin-email" 
+          class="form-input"
+          placeholder="Email address"
+          required
+          autocomplete="email"
+          spellcheck="false"
+        >
+        <span class="input-icon">📧</span>
+      </div>
+
+      <div class="form-group">
+        <input 
+          type="password" 
+          id="signin-pass" 
+          class="form-input"
+          placeholder="Password"
+          required
+          autocomplete="current-password"
+        >
+        <span class="input-icon">🔒</span>
+      </div>
+
+      <button type="submit" id="signin-btn" class="form-button">
+        <span class="loading-spinner"></span>
+        Sign In
+      </button>
+
+      <div id="signin-msg" class="message"></div>
+    </form>
+
+    <!-- Sign Up Form -->
+    <form class="auth-form" id="signup-form" novalidate>
+      <div class="form-group">
+        <input 
+          type="text" 
+          id="signup-username" 
+          class="form-input"
+          placeholder="Username"
+          required
+          autocomplete="username"
+          spellcheck="false"
+          minlength="2"
+          maxlength="30"
+        >
+        <span class="input-icon">👤</span>
+      </div>
+
+      <div class="form-group">
+        <input 
+          type="email" 
+          id="signup-email" 
+          class="form-input"
+          placeholder="Email address"
+          required
+          autocomplete="email"
+          spellcheck="false"
+        >
+        <span class="input-icon">📧</span>
+      </div>
+
+      <div class="form-group">
+        <input 
+          type="password" 
+          id="signup-pass" 
+          class="form-input"
+          placeholder="Password"
+          required
+          autocomplete="new-password"
+          minlength="6"
+        >
+        <span class="input-icon">🔒</span>
+        
+        <div class="password-requirements" id="passwordRequirements" style="display: none;">
+          <div class="requirement" id="lengthReq">
+            <span class="requirement-icon">○</span>
+            At least 6 characters
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" id="signup-btn" class="form-button">
+        <span class="loading-spinner"></span>
+        Create Account
+      </button>
+
+      <div id="signup-msg" class="message"></div>
+    </form>
+
+    <div class="form-footer">
+      <p>By signing up, you agree to our terms of service and privacy policy.</p>
     </div>
   </div>
 
+  <!-- Enhanced JavaScript for better UX -->
+  <script>
+    // Enhanced UI interactions
+    document.addEventListener('DOMContentLoaded', function() {
+      const tabs = document.querySelectorAll('.auth-tab');
+      const forms = document.querySelectorAll('.auth-form');
+      const passwordInput = document.getElementById('signup-pass');
+      const passwordRequirements = document.getElementById('passwordRequirements');
+      const lengthReq = document.getElementById('lengthReq');
+      const connectionStatus = document.getElementById('connectionStatus');
+
+      // Tab switching
+      tabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+          const targetTab = this.getAttribute('data-tab');
+          
+          // Update tab appearance
+          tabs.forEach(t => t.classList.remove('active'));
+          this.classList.add('active');
+          
+          // Update form visibility
+          forms.forEach(form => {
+            form.classList.remove('active');
+            if (form.id === targetTab + '-form') {
+              form.classList.add('active');
+            }
+          });
+
+          // Clear messages
+          document.querySelectorAll('.message').forEach(msg => {
+            msg.classList.remove('show');
+            msg.textContent = '';
+          });
+        });
+      });
+
+      // Password requirements checking
+      if (passwordInput) {
+        passwordInput.addEventListener('focus', function() {
+          passwordRequirements.style.display = 'block';
+        });
+
+        passwordInput.addEventListener('input', function() {
+          const value = this.value;
+          
+          // Check length requirement
+          if (value.length >= 6) {
+            lengthReq.classList.remove('invalid');
+            lengthReq.classList.add('valid');
+            lengthReq.querySelector('.requirement-icon').textContent = '✓';
+          } else {
+            lengthReq.classList.remove('valid');
+            lengthReq.classList.add('invalid');
+            lengthReq.querySelector('.requirement-icon').textContent = '○';
+          }
+        });
+
+        passwordInput.addEventListener('blur', function() {
+          if (this.value.length === 0) {
+            passwordRequirements.style.display = 'none';
+          }
+        });
+      }
+
+      // Form validation and submission prevention of default
+      document.getElementById('signin-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        // Auth.js will handle the actual submission
+      });
+
+      document.getElementById('signup-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        // Auth.js will handle the actual submission
+      });
+
+      // Connection status checker
+      function updateConnectionStatus() {
+        if (navigator.onLine) {
+          connectionStatus.className = 'connection-status online';
+          connectionStatus.textContent = 'Online';
+          setTimeout(() => {
+            connectionStatus.style.opacity = '0';
+          }, 2000);
+        } else {
+          connectionStatus.className = 'connection-status offline';
+          connectionStatus.textContent = 'Offline';
+          connectionStatus.style.opacity = '1';
+        }
+      }
+
+      // Check connection status
+      window.addEventListener('online', updateConnectionStatus);
+      window.addEventListener('offline', updateConnectionStatus);
+      
+      setTimeout(() => {
+        updateConnectionStatus();
+      }, 1000);
+
+      // Enhanced button states for loading
+      window.setButtonLoading = function(buttonId, loading) {
+        const button = document.getElementById(buttonId);
+        if (!button) return;
+        
+        if (loading) {
+          button.classList.add('loading');
+          button.disabled = true;
+        } else {
+          button.classList.remove('loading');
+          button.disabled = false;
+        }
+      };
+
+      // Enhanced message display
+      window.showAuthMessage = function(elementId, message, isError = false) {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        
+        element.textContent = message;
+        element.className = 'message show ' + (isError ? 'error' : 'success');
+        
+        // Auto-hide success messages
+        if (!isError) {
+          setTimeout(() => {
+            element.classList.remove('show');
+          }, 5000);
+        }
+      };
+
+      // Auto-focus first input
+      const activeForm = document.querySelector('.auth-form.active');
+      if (activeForm) {
+        const firstInput = activeForm.querySelector('.form-input');
+        if (firstInput) {
+          setTimeout(() => firstInput.focus(), 100);
+        }
+      }
+    });
+
+    // Global error handler for unhandled rejections
+    window.addEventListener('unhandledrejection', function(event) {
+      console.error('Unhandled promise rejection:', event.reason);
+      
+      const activeMessage = document.querySelector('.auth-form.active .message');
+      if (activeMessage && !activeMessage.textContent) {
+        window.showAuthMessage?.(activeMessage.id, 'An unexpected error occurred. Please try again.', true);
+      }
+    });
+
+    // Prevent form resubmission on page refresh
+    if (window.history.replaceState) {
+      window.history.replaceState(null, null, window.location.href);
+    }
+  </script>
+
+  <!-- Load the auth.js module -->
   <script type="module" src="auth.js"></script>
 </body>
 </html>
