@@ -1,9 +1,10 @@
-// auth.js - Fixed authentication handling with proper error handling and validation
+// auth.js - Debug version with extensive logging
 import { auth, db } from "./firebase.js";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
-  onAuthStateChanged
+  onAuthStateChanged,
+  connectAuthEmulator
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import { 
   doc, 
@@ -13,11 +14,56 @@ import {
   query,
   collection,
   where,
-  getDocs
+  getDocs,
+  connectFirestoreEmulator
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+
+/* ===== Debug Logging ===== */
+function debugLog(message, data = null) {
+  console.log(`[AUTH DEBUG] ${message}`, data || '');
+}
+
+function debugError(message, error = null) {
+  console.error(`[AUTH ERROR] ${message}`, error || '');
+}
 
 /* ===== State ===== */
 let authInitialized = false;
+let firebaseReady = false;
+
+/* ===== Test Firebase Connection ===== */
+async function testFirebaseConnection() {
+  debugLog("Testing Firebase connection...");
+  
+  try {
+    if (!auth) {
+      debugError("Auth is null - Firebase not initialized");
+      return false;
+    }
+    if (!db) {
+      debugError("Firestore is null - Firebase not initialized");
+      return false;
+    }
+    
+    // Test Firestore connection by reading a test document
+    debugLog("Testing Firestore connection...");
+    try {
+      await getDoc(doc(db, "test", "connection"));
+      debugLog("Firestore connection successful");
+    } catch (firestoreError) {
+      debugError("Firestore connection failed", firestoreError);
+      return false;
+    }
+    
+    debugLog("Firebase connection test passed");
+    firebaseReady = true;
+    return true;
+    
+  } catch (error) {
+    debugError("Firebase connection test failed", error);
+    return false;
+  }
+}
 
 /* ===== Helpers ===== */
 function showMessage(element, message, isError = false) {
@@ -25,6 +71,7 @@ function showMessage(element, message, isError = false) {
   element.textContent = message;
   element.style.color = isError ? "red" : "green";
   element.style.display = "block";
+  debugLog(`UI Message: ${message} (Error: ${isError})`);
 }
 
 function clearMessage(element) {
@@ -35,23 +82,35 @@ function clearMessage(element) {
 
 function validateEmail(email) {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
+  const isValid = emailRegex.test(email);
+  debugLog(`Email validation for "${email}": ${isValid}`);
+  return isValid;
 }
 
 function validatePassword(password) {
-  return password && password.length >= 6;
+  const isValid = password && password.length >= 6;
+  debugLog(`Password validation (length ${password?.length}): ${isValid}`);
+  return isValid;
 }
 
 function validateUsername(username) {
-  if (!username || username.length < 2) return false;
-  if (username.length > 30) return false;
-  // Allow letters, numbers, spaces, and basic punctuation
+  if (!username || username.length < 2) {
+    debugLog(`Username validation failed: too short (${username?.length})`);
+    return false;
+  }
+  if (username.length > 30) {
+    debugLog(`Username validation failed: too long (${username.length})`);
+    return false;
+  }
   const validChars = /^[a-zA-Z0-9\s._-]+$/;
-  return validChars.test(username);
+  const isValid = validChars.test(username);
+  debugLog(`Username validation for "${username}": ${isValid}`);
+  return isValid;
 }
 
 /* ===== Check if username is already taken ===== */
 async function isUsernameTaken(username) {
+  debugLog(`Checking if username "${username}" is taken...`);
   try {
     const normalizedUsername = username.toLowerCase().trim();
     const q = query(
@@ -59,26 +118,37 @@ async function isUsernameTaken(username) {
       where("usernameLower", "==", normalizedUsername)
     );
     const snapshot = await getDocs(q);
-    return !snapshot.empty;
+    const taken = !snapshot.empty;
+    debugLog(`Username "${username}" taken: ${taken}`);
+    return taken;
   } catch (err) {
-    console.error("Error checking username availability:", err);
-    // If we can't check, assume it's available to not block registration
+    debugError("Error checking username availability", err);
     return false;
   }
 }
 
-/* ===== Check if user is already signed in and redirect ===== */
+/* ===== Auth State Listener ===== */
 onAuthStateChanged(auth, (user) => {
   authInitialized = true;
+  debugLog("Auth state changed", user ? { uid: user.uid, email: user.email } : "null");
+  
   if (user) {
-    console.log("User already signed in, redirecting to index.html");
-    window.location.replace("index.html");
+    debugLog("User already signed in, redirecting to index.html");
+    setTimeout(() => {
+      window.location.replace("index.html");
+    }, 1000);
   }
 });
 
 /* ===== DOM Ready Handler ===== */
-document.addEventListener("DOMContentLoaded", () => {
-  console.log("Auth page DOM loaded");
+document.addEventListener("DOMContentLoaded", async () => {
+  debugLog("DOM loaded, initializing auth page");
+
+  // Test Firebase connection first
+  const connectionOk = await testFirebaseConnection();
+  if (!connectionOk) {
+    debugError("Firebase connection failed - auth will not work");
+  }
 
   // Get DOM elements
   const signupUsername = document.getElementById("signup-username");
@@ -92,22 +162,41 @@ document.addEventListener("DOMContentLoaded", () => {
   const signinBtn = document.getElementById("signin-btn");
   const signinMsg = document.getElementById("signin-msg");
 
-  // Check if required elements exist
+  // Debug DOM elements
+  debugLog("DOM elements found:", {
+    signupUsername: !!signupUsername,
+    signupEmail: !!signupEmail,
+    signupPass: !!signupPass,
+    signupBtn: !!signupBtn,
+    signupMsg: !!signupMsg,
+    signinEmail: !!signinEmail,
+    signinPass: !!signinPass,
+    signinBtn: !!signinBtn,
+    signinMsg: !!signinMsg
+  });
+
   if (!signupBtn || !signinBtn) {
-    console.error("Required auth form elements not found in DOM");
+    debugError("Required auth form elements not found in DOM");
     return;
   }
 
   /* ===== Sign Up Handler ===== */
   signupBtn.addEventListener("click", async (e) => {
     e.preventDefault();
+    debugLog("Sign up button clicked");
     
     const username = signupUsername?.value?.trim() || "";
     const email = signupEmail?.value?.trim() || "";
     const pass = signupPass?.value?.trim() || "";
 
-    // Clear previous messages
+    debugLog("Sign up attempt", { username, email, passwordLength: pass.length });
+
     clearMessage(signupMsg);
+
+    if (!firebaseReady) {
+      showMessage(signupMsg, "Firebase not ready. Please refresh the page.", true);
+      return;
+    }
 
     // Validation
     if (!validateUsername(username)) {
@@ -125,26 +214,24 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Disable button during process
     signupBtn.disabled = true;
     signupBtn.textContent = "Creating Account...";
 
     try {
-      // Check if username is taken
+      debugLog("Checking username availability...");
       const usernameTaken = await isUsernameTaken(username);
       if (usernameTaken) {
         showMessage(signupMsg, "Username is already taken. Please choose another.", true);
-        signupBtn.disabled = false;
-        signupBtn.textContent = "Sign Up";
         return;
       }
 
-      // Create Firebase Auth account
+      debugLog("Creating Firebase Auth account...");
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const user = userCredential.user;
+      debugLog("Auth account created", { uid: user.uid });
 
-      // Create user document in Firestore
-      await setDoc(doc(db, "users", user.uid), {
+      debugLog("Creating Firestore user document...");
+      const userData = {
         username: username,
         usernameLower: username.toLowerCase(),
         bio: "",
@@ -153,24 +240,25 @@ document.addEventListener("DOMContentLoaded", () => {
         email: email,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
+      };
+      
+      await setDoc(doc(db, "users", user.uid), userData);
+      debugLog("Firestore user document created");
 
       showMessage(signupMsg, "✅ Account created successfully! Redirecting...");
       
-      // Clear form
       if (signupUsername) signupUsername.value = "";
       if (signupEmail) signupEmail.value = "";
       if (signupPass) signupPass.value = "";
 
-      // Redirect after short delay
       setTimeout(() => {
+        debugLog("Redirecting to index.html");
         window.location.href = "index.html";
       }, 1500);
 
     } catch (err) {
-      console.error("Signup error:", err);
+      debugError("Signup failed", err);
       
-      // Handle specific Firebase Auth errors
       let errorMessage = "Registration failed. ";
       switch (err.code) {
         case "auth/email-already-in-use":
@@ -185,16 +273,16 @@ document.addEventListener("DOMContentLoaded", () => {
         case "auth/network-request-failed":
           errorMessage += "Network error. Check your connection.";
           break;
+        case "permission-denied":
+          errorMessage += "Database permission denied. Check Firestore rules.";
+          break;
         default:
-          errorMessage += err.message;
+          errorMessage += `${err.code}: ${err.message}`;
       }
       
       showMessage(signupMsg, "❌ " + errorMessage, true);
-      
-      // Clear password field
       if (signupPass) signupPass.value = "";
     } finally {
-      // Re-enable button
       signupBtn.disabled = false;
       signupBtn.textContent = "Sign Up";
     }
@@ -203,14 +291,20 @@ document.addEventListener("DOMContentLoaded", () => {
   /* ===== Sign In Handler ===== */
   signinBtn.addEventListener("click", async (e) => {
     e.preventDefault();
+    debugLog("Sign in button clicked");
     
     const email = signinEmail?.value?.trim() || "";
     const pass = signinPass?.value?.trim() || "";
 
-    // Clear previous messages
+    debugLog("Sign in attempt", { email, passwordLength: pass.length });
+
     clearMessage(signinMsg);
 
-    // Validation
+    if (!firebaseReady) {
+      showMessage(signinMsg, "Firebase not ready. Please refresh the page.", true);
+      return;
+    }
+
     if (!validateEmail(email)) {
       showMessage(signinMsg, "Please enter a valid email address.", true);
       return;
@@ -221,33 +315,33 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Disable button during process
     signinBtn.disabled = true;
     signinBtn.textContent = "Signing In...";
 
     try {
-      await signInWithEmailAndPassword(auth, email, pass);
+      debugLog("Attempting Firebase Auth sign in...");
+      const userCredential = await signInWithEmailAndPassword(auth, email, pass);
+      debugLog("Sign in successful", { uid: userCredential.user.uid });
 
       showMessage(signinMsg, "✅ Logged in successfully! Redirecting...");
       
-      // Clear form
       if (signinEmail) signinEmail.value = "";
       if (signinPass) signinPass.value = "";
 
-      // Redirect after short delay
       setTimeout(() => {
+        debugLog("Redirecting to index.html");
         window.location.href = "index.html";
       }, 1000);
 
     } catch (err) {
-      console.error("Signin error:", err);
+      debugError("Sign in failed", err);
       
-      // Handle specific Firebase Auth errors
       let errorMessage = "Login failed. ";
       switch (err.code) {
         case "auth/user-not-found":
         case "auth/wrong-password":
         case "auth/invalid-credential":
+        case "auth/invalid-login-credentials":
           errorMessage += "Invalid email or password.";
           break;
         case "auth/invalid-email":
@@ -263,15 +357,12 @@ document.addEventListener("DOMContentLoaded", () => {
           errorMessage += "Network error. Check your connection.";
           break;
         default:
-          errorMessage += err.message;
+          errorMessage += `${err.code}: ${err.message}`;
       }
       
       showMessage(signinMsg, "❌ " + errorMessage, true);
-      
-      // Clear password field
       if (signinPass) signinPass.value = "";
     } finally {
-      // Re-enable button
       signinBtn.disabled = false;
       signinBtn.textContent = "Sign In";
     }
@@ -296,21 +387,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  console.log("Auth handlers initialized successfully");
+  debugLog("Auth handlers initialized successfully");
 });
 
-/* ===== Safety check for missing Firebase config ===== */
+/* ===== Debug Panel (remove in production) ===== */
 setTimeout(() => {
-  if (!auth || !db) {
-    console.error("Firebase not properly initialized");
-    const errorElements = [
-      document.getElementById("signup-msg"),
-      document.getElementById("signin-msg")
-    ];
-    errorElements.forEach(el => {
-      if (el) {
-        showMessage(el, "❌ Firebase configuration error. Please check your setup.", true);
-      }
-    });
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    const debugPanel = document.createElement('div');
+    debugPanel.innerHTML = `
+      <div style="position: fixed; top: 10px; right: 10px; background: #333; color: white; padding: 10px; border-radius: 5px; font-size: 12px; z-index: 10000;">
+        <div>Firebase Ready: ${firebaseReady}</div>
+        <div>Auth: ${auth ? '✓' : '✗'}</div>
+        <div>DB: ${db ? '✓' : '✗'}</div>
+        <button onclick="console.clear()" style="margin-top: 5px; padding: 2px 5px;">Clear Console</button>
+      </div>
+    `;
+    document.body.appendChild(debugPanel);
   }
-}, 1000);
+}, 2000);
