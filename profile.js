@@ -1,37 +1,16 @@
-/*
- * =========================================================================================
- * YESTER CHAT: PROFILE.JS (Using Firebase v12.1.0)
- * =========================================================================================
- * This script manages user profiles, editing, friend requests, and friend lists.
- * It has been updated to use the latest Firebase SDK version for full compatibility.
- * =========================================================================================
- */
-
-/* ---------- Part 1: Imports & DOM Elements ---------- */
-
+// profile.js
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
 import {
-  doc,
-  getDoc,
-  updateDoc,
-  addDoc,
-  collection,
-  query,
-  where,
-  serverTimestamp,
-  setDoc,
-  getDocs,
-  onSnapshot,
-  arrayRemove,
+  doc, getDoc, updateDoc, addDoc, collection, query, where,
+  serverTimestamp, setDoc, getDocs, onSnapshot, arrayRemove,
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import {
   onAuthStateChanged,
   updateProfile as updateAuthProfile,
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 
-// --- DOM Elements ---
-// This script assumes it's running on a page with these elements.
+/* ===== DOM Elements ===== */
 const profileAvatar = document.getElementById("profileAvatar");
 const profileUsername = document.getElementById("profileUsername");
 const profileEmail = document.getElementById("profileEmail");
@@ -48,12 +27,10 @@ const editMsg = document.getElementById("editMsg");
 const friendsListContainer = document.getElementById("friendsListContainer");
 const friendsList = document.getElementById("friendsList");
 
-/* ---------- Part 2: State & Helpers ---------- */
-
+/* ===== State & Helpers ===== */
 let currentUser = null;
 let viewedProfileData = null;
 let friendsListenerUnsubscribe = null;
-
 const defaultAvatar = () => "https://www.gravatar.com/avatar/?d=mp&s=160";
 const getUidFromUrl = () => new URLSearchParams(window.location.search).get("uid");
 
@@ -64,60 +41,31 @@ function setButtonLoading(btn, isLoading, text = "Save") {
   btn.textContent = isLoading ? `${actionText}ing...` : text;
 }
 
-/* ---------- Part 3: Core Logic & Profile Rendering ---------- */
-
+/* ===== Core Logic & Profile Rendering ===== */
 export function initAuthListener() {
   if (!auth || !db) {
-    console.error(
-      "Firebase FATAL ERROR: The 'auth' or 'db' object is not being imported correctly from firebase.js."
-    );
+    console.error("Firebase FATAL ERROR: The 'auth' or 'db' object is not being imported correctly.");
     if (profileUsername) profileUsername.textContent = "Configuration Error";
     return;
   }
 
   onAuthStateChanged(auth, async (user) => {
     if (user) {
-      // This part of the code should only run on pages where profile elements exist.
-      // If profileUsername is not on the page, we can assume this script shouldn't be running fully.
-      if (!profileUsername) {
-        console.log("Profile script loaded on a non-profile page. Halting execution.");
-        return;
-      }
+      if (!profileUsername) return; // Don't run this script on pages without profile elements
       try {
         currentUser = user;
         const viewedUid = getUidFromUrl() || currentUser.uid;
-        await ensureUserDocExists(user);
         await loadProfilePage(viewedUid);
       } catch (error) {
         console.error("Failed to initialize profile page:", error);
         profileUsername.textContent = "Error Loading Profile";
-        profileBio.textContent = "Could not load user data. Check console.";
       }
     } else {
-      // **FIX:** Added a safety check to prevent infinite redirect loops.
-      // It now checks if we are already on the auth page before trying to redirect.
-      const isAuthPage = window.location.pathname.endsWith("auth.html");
-      if (!isAuthPage) {
+      if (!window.location.pathname.endsWith("auth.html")) {
         window.location.replace("auth.html");
       }
     }
   });
-}
-
-async function ensureUserDocExists(user) {
-  const userRef = doc(db, "users", user.uid);
-  const docSnap = await getDoc(userRef);
-  if (!docSnap.exists()) {
-    const usernameDefault = user.email ? user.email.split("@")[0].replace(/[^a-zA-Z0-9]/g, '') : "new_user";
-    await setDoc(userRef, {
-      username: usernameDefault,
-      usernameLower: usernameDefault.toLowerCase(),
-      bio: "Just joined Yester Chat!",
-      photoURL: user.photoURL || "",
-      friends: [],
-      createdAt: serverTimestamp(),
-    });
-  }
 }
 
 async function loadProfilePage(uid) {
@@ -126,11 +74,6 @@ async function loadProfilePage(uid) {
 
   if (!docSnap.exists()) {
     profileUsername.textContent = "User Not Found";
-    [profileBio, profileEmail].forEach((el) => (el.textContent = ""));
-    profileAvatar.src = defaultAvatar();
-    profileActions.innerHTML = "";
-    editArea.style.display = "none";
-    friendsListContainer.style.display = "none";
     return;
   }
 
@@ -188,12 +131,7 @@ async function renderVisitorView() {
 
       if (!requestSnap.empty) {
         const request = requestSnap.docs[0].data();
-        const statusText = document.createElement("p");
-        statusText.className = "small";
-        statusText.textContent = request.fromUid === currentUser.uid
-            ? "Friend request sent."
-            : "This user sent you a friend request.";
-        profileActions.appendChild(statusText);
+        profileActions.innerHTML = `<p class="small">${request.fromUid === currentUser.uid ? "Friend request sent." : "This user sent you a friend request."}</p>`;
       } else {
         const addFriendBtn = document.createElement("button");
         addFriendBtn.textContent = "Add Friend";
@@ -207,8 +145,7 @@ async function renderVisitorView() {
   }
 }
 
-/* ---------- Part 4: Profile Editing & Saving ---------- */
-
+/* ===== Profile Editing & Saving ===== */
 async function handleProfileSave() {
   const newUsername = editUsername.value.trim();
   const newBio = editBio.value.trim();
@@ -220,37 +157,24 @@ async function handleProfileSave() {
   }
   
   setButtonLoading(saveProfileBtn, true, "Save Profile");
-  editMsg.textContent = "Checking username...";
   
   try {
     const unameQuery = query(collection(db, "users"), where("usernameLower", "==", newUsername.toLowerCase()));
     const unameSnap = await getDocs(unameQuery);
-    const isTaken = !unameSnap.empty && unameSnap.docs[0].id !== currentUser.uid;
-    
-    if (isTaken) {
-      editMsg.textContent = "Username is already taken.";
-      setButtonLoading(saveProfileBtn, false, "Save Profile");
-      return;
+    if (!unameSnap.empty && unameSnap.docs[0].id !== currentUser.uid) {
+      throw new Error("Username is already taken.");
     }
     
     let photoURL = viewedProfileData.photoURL;
     if (file) {
-      editMsg.textContent = "Uploading photo...";
-      if (file.size > 5 * 1024 * 1024) throw new Error("File size exceeds 5MB.");
-      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Invalid file type.");
       photoURL = await uploadProfileImage(file, currentUser.uid);
     }
 
-    editMsg.textContent = "Saving profile...";
     const userRef = doc(db, "users", currentUser.uid);
     await updateDoc(userRef, {
-      username: newUsername,
-      usernameLower: newUsername.toLowerCase(),
-      bio: newBio,
-      photoURL: photoURL,
-      updatedAt: serverTimestamp(),
+      username: newUsername, usernameLower: newUsername.toLowerCase(),
+      bio: newBio, photoURL: photoURL, updatedAt: serverTimestamp(),
     });
-    
     await updateAuthProfile(currentUser, { displayName: newUsername, photoURL });
     
     editMsg.textContent = "Profile saved successfully!";
@@ -277,29 +201,26 @@ cancelEditBtn?.addEventListener("click", () => {
   editMsg.textContent = "";
 });
 
-/* ---------- Part 5: Friend Actions ---------- */
-
+/* ===== Friend Actions ===== */
 async function sendFriendRequest(targetUid, btn) {
   setButtonLoading(btn, true, "Add Friend");
   try {
     await addDoc(collection(db, "friendRequests"), {
-      fromUid: currentUser.uid,
-      toUid: targetUid,
-      status: "pending",
-      createdAt: serverTimestamp(),
+      fromUid: currentUser.uid, toUid: targetUid,
+      status: "pending", createdAt: serverTimestamp(),
     });
     await renderVisitorView();
   } catch (error) {
     console.error("Friend request error:", error);
-    alert("Failed to send friend request.");
     setButtonLoading(btn, false, "Add Friend");
   }
 }
 
 async function removeFriend(friendUid, btn) {
   if (!confirm(`Are you sure you want to unfriend ${viewedProfileData.username}?`)) return;
-
-  setButton.disabled = true;
+  
+  // Bug Fix: Was `setButton.disabled`, now correctly targets `btn`
+  btn.disabled = true;
   setButtonLoading(btn, true, "Unfriend");
   try {
     const currentUserRef = doc(db, "users", currentUser.uid);
@@ -311,14 +232,12 @@ async function removeFriend(friendUid, btn) {
     await renderVisitorView();
   } catch (error) {
     console.error("Unfriend error:", error);
-    alert("Failed to remove friend.");
   } finally {
     setButtonLoading(btn, false, "Unfriend");
   }
 }
 
-/* ---------- Part 6: Live Friends List ---------- */
-
+/* ===== Live Friends List ===== */
 function startFriendsListener() {
   if (friendsListenerUnsubscribe) friendsListenerUnsubscribe();
 
@@ -327,42 +246,27 @@ function startFriendsListener() {
     if (docSnap.exists()) {
       renderFriendsList(docSnap.data().friends || []);
     }
-  }, (error) => {
-    console.error("Friends listener error:", error);
-    friendsList.innerHTML = `<li class="small">Error loading friends.</li>`;
   });
 }
 
 async function renderFriendsList(friendUids) {
+  if (!friendsList) return;
+  friendsList.innerHTML = "";
   if (friendUids.length === 0) {
     friendsList.innerHTML = `<li class="small">You haven't added any friends yet.</li>`;
     return;
   }
   
-  friendsList.innerHTML = `<li class="small">Loading friends...</li>`;
-
-  try {
-    const friendPromises = friendUids.map(uid => getDoc(doc(db, "users", uid)));
-    const friendDocs = await Promise.all(friendPromises);
-    
-    friendsList.innerHTML = "";
-    
-    friendDocs.forEach(docSnap => {
-      if (docSnap.exists()) {
-        const friend = { uid: docSnap.id, ...docSnap.data() };
-        const li = document.createElement("li");
-li.className = "friend-item";
-        li.innerHTML = `
-          <img src="${friend.photoURL || defaultAvatar()}" alt="${friend.username}" />
-          <span>${friend.username || "Unknown"}</span>
-        `;
-        li.onclick = () => (window.location.href = `profile.html?uid=${friend.uid}`);
-        friendsList.appendChild(li);
-      }
-    });
-  } catch (error) {
-    console.error("Failed to render friends list:", error);
-    friendsList.innerHTML = `<li class="small">Could not load friends list.</li>`;
+  for(const uid of friendUids){
+    const userSnap = await getDoc(doc(db, "users", uid));
+    if(userSnap.exists()){
+      const friend = { uid: userSnap.id, ...userSnap.data() };
+      const li = document.createElement("li");
+      li.className = "friend-item";
+      li.innerHTML = `<img src="${friend.photoURL || defaultAvatar()}" alt="${friend.username}" style="width:32px;height:32px;border-radius:50%;"/><span>${friend.username}</span>`;
+      li.onclick = () => window.location.href = `profile.html?uid=${friend.uid}`;
+      friendsList.appendChild(li);
+    }
   }
 }
 
