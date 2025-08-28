@@ -1,15 +1,14 @@
 /*
  * =========================================================================================
- * YESTER CHAT: PROFILE.JS (REVISED)
+ * YESTER CHAT: PROFILE.JS (FINAL REVISION)
  * =========================================================================================
  * This script manages user profiles, editing, friend requests, and friend lists.
  *
  * Key Fixes & Improvements:
- * 1.  **Firestore Reference Fix:** Corrected the call to the `collection()` function
- * that was causing the "Expected first argument" error.
- * 2.  **Robust Loading:** Includes a try...catch block in the main auth listener to prevent
- * silent failures.
- * 3.  **Error Logging:** Enhanced error logging throughout the script.
+ * 1.  **Critical Import Check:** Added an explicit check to ensure the `auth` and `db`
+ * objects from firebase.js are valid. This will catch any export/import issues
+ * immediately and provide a clear console error.
+ * 2.  **Error Handling:** Retains robust try...catch blocks for all async operations.
  * =========================================================================================
  */
 
@@ -42,8 +41,6 @@ const profileUsername = document.getElementById("profileUsername");
 const profileEmail = document.getElementById("profileEmail");
 const profileBio = document.getElementById("profileBio");
 const profileActions = document.getElementById("profile-actions");
-
-// Profile Editing
 const editArea = document.getElementById("editArea");
 const editAvatarPreview = document.getElementById("editAvatarPreview");
 const editUsername = document.getElementById("editUsername");
@@ -52,8 +49,6 @@ const photoInput = document.getElementById("photoInput");
 const saveProfileBtn = document.getElementById("saveProfileBtn");
 const cancelEditBtn = document.getElementById("cancelEditBtn");
 const editMsg = document.getElementById("editMsg");
-
-// Friends List
 const friendsListContainer = document.getElementById("friendsListContainer");
 const friendsList = document.getElementById("friendsList");
 
@@ -75,10 +70,18 @@ function setButtonLoading(btn, isLoading, text = "Save") {
 
 /* ---------- Part 3: Core Logic & Profile Rendering ---------- */
 
-/**
- * Initializes the authentication listener. This is the entry point of the script.
- */
 export function initAuthListener() {
+  // **CRITICAL FIX:** Check if Firebase services are imported correctly.
+  // If `db` is undefined, the error you're seeing will occur.
+  if (!auth || !db) {
+    console.error(
+      "Firebase FATAL ERROR: The 'auth' or 'db' object is not being imported correctly from firebase.js. Please check your firebase.js file to ensure you are exporting 'auth' and 'db' properly."
+    );
+    profileUsername.textContent = "Configuration Error";
+    profileBio.textContent = "Could not connect to the database. Check the console.";
+    return;
+  }
+
   onAuthStateChanged(auth, async (user) => {
     if (user) {
       try {
@@ -89,7 +92,7 @@ export function initAuthListener() {
       } catch (error) {
         console.error("Failed to initialize profile page:", error);
         profileUsername.textContent = "Error Loading Profile";
-        profileBio.textContent = "Could not load user data. Please check the console for errors and try again later.";
+        profileBio.textContent = "Could not load user data. Please check the console and try again.";
       }
     } else {
       window.location.replace("auth.html");
@@ -97,14 +100,10 @@ export function initAuthListener() {
   });
 }
 
-/**
- * Creates a user document in Firestore if it doesn't already exist.
- */
 async function ensureUserDocExists(user) {
   const userRef = doc(db, "users", user.uid);
   const docSnap = await getDoc(userRef);
   if (!docSnap.exists()) {
-    console.log(`Creating user document for ${user.uid}`);
     const usernameDefault = user.email ? user.email.split("@")[0].replace(/[^a-zA-Z0-9]/g, '') : "new_user";
     await setDoc(userRef, {
       username: usernameDefault,
@@ -117,9 +116,6 @@ async function ensureUserDocExists(user) {
   }
 }
 
-/**
- * Fetches data and renders the entire profile page for a given UID.
- */
 async function loadProfilePage(uid) {
   const userRef = doc(db, "users", uid);
   const docSnap = await getDoc(userRef);
@@ -147,9 +143,6 @@ async function loadProfilePage(uid) {
   }
 }
 
-/**
- * Renders the view for the profile owner (shows edit form, friends list).
- */
 function renderOwnerView() {
   profileEmail.textContent = currentUser.email;
   friendsListContainer.style.display = "block";
@@ -163,9 +156,6 @@ function renderOwnerView() {
   startFriendsListener();
 }
 
-/**
- * Renders the view for a visitor (shows friend actions, hides sensitive info).
- */
 async function renderVisitorView() {
   profileEmail.textContent = "";
   editArea.style.display = "none";
@@ -178,7 +168,7 @@ async function renderVisitorView() {
 
     const myFriends = myProfileSnap.data()?.friends || [];
     const isFriend = myFriends.includes(viewedProfileData.uid);
-    profileActions.innerHTML = ""; // Clear loading text
+    profileActions.innerHTML = "";
 
     if (isFriend) {
       const unfriendBtn = document.createElement("button");
@@ -186,7 +176,6 @@ async function renderVisitorView() {
       unfriendBtn.onclick = () => removeFriend(viewedProfileData.uid, unfriendBtn);
       profileActions.appendChild(unfriendBtn);
     } else {
-      // **FIX:** The `collection` function requires the `db` instance as its first argument.
       const requestsRef = collection(db, "friendRequests");
       const q = query(
         requestsRef,
@@ -275,12 +264,10 @@ async function handleProfileSave() {
 }
 
 saveProfileBtn?.addEventListener("click", handleProfileSave);
-
 photoInput?.addEventListener("change", () => {
   const file = photoInput.files[0];
   if (file) editAvatarPreview.src = URL.createObjectURL(file);
 });
-
 cancelEditBtn?.addEventListener("click", () => {
   editUsername.value = viewedProfileData.username;
   editBio.value = viewedProfileData.bio;
@@ -355,7 +342,7 @@ async function renderFriendsList(friendUids) {
     const friendPromises = friendUids.map(uid => getDoc(doc(db, "users", uid)));
     const friendDocs = await Promise.all(friendPromises);
     
-    friendsList.innerHTML = ""; // Clear loading message
+    friendsList.innerHTML = "";
     
     friendDocs.forEach(docSnap => {
       if (docSnap.exists()) {
@@ -376,5 +363,5 @@ async function renderFriendsList(friendUids) {
   }
 }
 
-// Automatically initialize the script when loaded
+// Automatically initialize the script
 initAuthListener();
