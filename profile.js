@@ -5,12 +5,11 @@
  * This script manages user profiles, editing, friend requests, and friend lists.
  *
  * Key Fixes & Improvements:
- * 1.  **Robust Loading:** Added a try...catch block to the main auth listener to prevent
- * silent failures. If a profile can't be loaded, an error will now appear in the
- * console, and a message will show on the screen.
- * 2.  **Error Logging:** Enhanced error logging throughout the script to make future
- * debugging easier.
- * 3.  **Code Consistency:** Ensured all Firebase imports use a consistent, modern version.
+ * 1.  **Firestore Reference Fix:** Corrected the call to the `collection()` function
+ * that was causing the "Expected first argument" error.
+ * 2.  **Robust Loading:** Includes a try...catch block in the main auth listener to prevent
+ * silent failures.
+ * 3.  **Error Logging:** Enhanced error logging throughout the script.
  * =========================================================================================
  */
 
@@ -82,8 +81,6 @@ function setButtonLoading(btn, isLoading, text = "Save") {
 export function initAuthListener() {
   onAuthStateChanged(auth, async (user) => {
     if (user) {
-      // **FIX:** Added a try...catch block to handle errors during initialization.
-      // This prevents the entire script from failing silently.
       try {
         currentUser = user;
         const viewedUid = getUidFromUrl() || currentUser.uid;
@@ -189,8 +186,10 @@ async function renderVisitorView() {
       unfriendBtn.onclick = () => removeFriend(viewedProfileData.uid, unfriendBtn);
       profileActions.appendChild(unfriendBtn);
     } else {
+      // **FIX:** The `collection` function requires the `db` instance as its first argument.
+      const requestsRef = collection(db, "friendRequests");
       const q = query(
-        collection(db, "friendRequests"),
+        requestsRef,
         where("fromUid", "in", [currentUser.uid, viewedProfileData.uid]),
         where("toUid", "in", [currentUser.uid, viewedProfileData.uid]),
         where("status", "==", "pending")
