@@ -43,6 +43,7 @@ const friendItemTemplate = document.getElementById("friendItemTemplate");
 
 /* ===== State ===== */
 let authChecked = false;
+let authReady = false;
 let unsubscriptions = { chat: null, userDoc: null, incomingRequests: null, outgoingRequests: null };
 const profileCache = {}; // uid -> profile data cache
 
@@ -112,26 +113,54 @@ function cleanupRealtime() {
   if (friendRequestsContainer) friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
 }
 
+/* Show signed out state */
+function showSignedOutState() {
+  console.log("Showing signed out state");
+  if (mePreview) mePreview.style.display = "none";
+  if (myProfileBtn) { 
+    myProfileBtn.style.display = "none"; 
+    myProfileBtn.onclick = null; 
+  }
+  if (logoutBtn) logoutBtn.style.display = "none";
+  if (authBtn) authBtn.style.display = "inline-block";
+  if (signedOutNotice) signedOutNotice.style.display = "block";
+  if (chatContainer) chatContainer.style.display = "none";
+  if (friendsContainer) friendsContainer.style.display = "none";
+  
+  cleanupRealtime();
+}
+
+/* Show signed in state */
+function showSignedInState(user) {
+  console.log("Showing signed in state for user:", user.uid);
+  if (mePreview) mePreview.style.display = "inline-flex";
+  if (myProfileBtn) { 
+    myProfileBtn.style.display = "inline-block"; 
+    myProfileBtn.onclick = () => openProfile(user.uid); 
+  }
+  if (logoutBtn) logoutBtn.style.display = "inline-block";
+  if (authBtn) authBtn.style.display = "none";
+  if (signedOutNotice) signedOutNotice.style.display = "none";
+  if (friendsContainer) friendsContainer.style.display = "block";
+  if (chatContainer) chatContainer.style.display = "block";
+}
+
 /* ===== Auth State Handling ===== */
 onAuthStateChanged(auth, async (user) => {
   authChecked = true;
+  authReady = true;
   console.log("Auth state changed:", user ? user.uid : null);
 
   if (!user) {
     // Signed out: hide profile controls & show auth button
-    if (mePreview) mePreview.style.display = "none";
-    if (myProfileBtn) { myProfileBtn.style.display = "none"; myProfileBtn.onclick = null; }
-    if (logoutBtn) logoutBtn.style.display = "none";
-    if (authBtn) authBtn.style.display = "inline-block";
-    if (signedOutNotice) signedOutNotice.style.display = "block";
-    if (chatContainer) chatContainer.style.display = "none";
-    if (friendsContainer) friendsContainer.style.display = "none";
-
-    cleanupRealtime();
+    showSignedOutState();
 
     // friendly redirect to auth page after 8s (as your original UX did)
     setTimeout(() => {
-      if (!auth.currentUser) window.location.replace("auth.html");
+      if (!auth.currentUser && authReady) {
+        console.log("Redirecting to auth.html - no user found");
+        window.location.replace("auth.html");
+      }
     }, 8000);
 
     return;
@@ -139,57 +168,74 @@ onAuthStateChanged(auth, async (user) => {
 
   // Signed in
   try {
+    console.log("User is signed in, initializing...");
     await ensureMyUserDoc(user);
 
     const me = profileCache[user.uid] || await fetchProfile(user.uid);
+    
+    // Update topbar immediately
     if (meAvatarSmall) meAvatarSmall.src = me.photoURL || defaultAvatar();
-    if (meName) meName.textContent = me.username || (user.displayName || user.email.split("@")[0]);
+    if (meName) meName.textContent = me.username || (user.displayName || (user.email ? user.email.split("@")[0] : "User"));
 
-    if (mePreview) mePreview.style.display = "inline-flex";
-    if (myProfileBtn) { myProfileBtn.style.display = "inline-block"; myProfileBtn.onclick = () => openProfile(user.uid); }
-    if (logoutBtn) logoutBtn.style.display = "inline-block";
-    if (authBtn) authBtn.style.display = "none";
-    if (signedOutNotice) signedOutNotice.style.display = "none";
-    if (friendsContainer) friendsContainer.style.display = "block";
-    if (chatContainer) chatContainer.style.display = "block";
+    // Show signed in state
+    showSignedInState(user);
 
     // start listeners
     startUserDocListener(user);
     startChatListener(user);
     startIncomingRequestsListener(user);
     startOutgoingRequestsListener(user);
+
+    console.log("User initialization complete");
   } catch (err) {
     console.error("Post-auth initialization error:", err);
   }
 });
 
 /* ===== Auth Buttons ===== */
-if (authBtn) authBtn.addEventListener("click", () => window.location.href = "auth.html");
-if (myProfileBtn) myProfileBtn.addEventListener("click", () => {
-  const uid = auth.currentUser?.uid;
-  if (uid) openProfile(uid);
-});
-if (logoutBtn) logoutBtn.addEventListener("click", async () => {
-  try {
-    cleanupRealtime();
-    await signOut(auth);
-    window.location.replace("auth.html");
-  } catch (err) {
-    console.error("Logout failed:", err);
-    alert("Logout failed. See console.");
-  }
-});
+if (authBtn) {
+  authBtn.addEventListener("click", () => {
+    console.log("Auth button clicked");
+    window.location.href = "auth.html";
+  });
+}
+
+if (myProfileBtn) {
+  myProfileBtn.addEventListener("click", () => {
+    const uid = auth.currentUser?.uid;
+    if (uid) openProfile(uid);
+  });
+}
+
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", async () => {
+    try {
+      console.log("Logging out...");
+      cleanupRealtime();
+      await signOut(auth);
+      window.location.replace("auth.html");
+    } catch (err) {
+      console.error("Logout failed:", err);
+      alert("Logout failed. See console.");
+    }
+  });
+}
 
 /* ===== Chat Listener & Send ===== */
 function startChatListener(user) {
   if (!user || !chatBox) return;
-  if (unsubscriptions.chat) return;
+  if (unsubscriptions.chat) {
+    console.log("Chat listener already active");
+    return;
+  }
 
+  console.log("Starting chat listener");
   const messagesRef = collection(db, "servers", "defaultServer", "messages");
   const q = query(messagesRef, orderBy("timestamp"));
 
   unsubscriptions.chat = onSnapshot(q, async (snapshot) => {
     try {
+      console.log("Chat messages updated:", snapshot.docs.length);
       const messages = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       const missing = new Set();
       messages.forEach(m => { if (m.senderId && !profileCache[m.senderId]) missing.add(m.senderId); });
@@ -210,16 +256,20 @@ function startChatListener(user) {
           const timeEl = clone.querySelector(".time");
           const textEl = clone.querySelector(".message-text");
 
-          img.src = avatar;
-          img.setAttribute("data-uid", uid || "");
-          img.style.cursor = uid ? "pointer" : "default";
+          if (img) {
+            img.src = avatar;
+            img.setAttribute("data-uid", uid || "");
+            img.style.cursor = uid ? "pointer" : "default";
+          }
 
-          senderNameEl.textContent = name;
-          senderNameEl.setAttribute("data-uid", uid || "");
-          senderNameEl.style.cursor = uid ? "pointer" : "default";
+          if (senderNameEl) {
+            senderNameEl.textContent = name;
+            senderNameEl.setAttribute("data-uid", uid || "");
+            senderNameEl.style.cursor = uid ? "pointer" : "default";
+          }
 
-          timeEl.textContent = timeStr;
-          textEl.innerHTML = escapeHtml(m.text || "");
+          if (timeEl) timeEl.textContent = timeStr;
+          if (textEl) textEl.innerHTML = escapeHtml(m.text || "");
 
           const wrapper = document.createElement("div");
           wrapper.appendChild(clone);
@@ -291,8 +341,12 @@ function startChatListener(user) {
 */
 function startIncomingRequestsListener(user) {
   if (!user || !friendRequestsContainer) return;
-  if (unsubscriptions.incomingRequests) return;
+  if (unsubscriptions.incomingRequests) {
+    console.log("Incoming requests listener already active");
+    return;
+  }
 
+  console.log("Starting incoming requests listener");
   const q = query(
     collection(db, "friendRequests"),
     where("toUid", "==", user.uid),
@@ -301,6 +355,7 @@ function startIncomingRequestsListener(user) {
 
   unsubscriptions.incomingRequests = onSnapshot(q, async snapshot => {
     try {
+      console.log("Incoming requests updated:", snapshot.docs.length);
       friendRequestsContainer.innerHTML = "";
       if (snapshot.empty) {
         friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
@@ -372,11 +427,15 @@ function startIncomingRequestsListener(user) {
       }
     } catch (err) {
       console.error("Requests render error:", err);
-      friendRequestsContainer.innerHTML = "<div class='small'>Failed to load requests</div>";
+      if (friendRequestsContainer) {
+        friendRequestsContainer.innerHTML = "<div class='small'>Failed to load requests</div>";
+      }
     }
   }, err => {
     console.error("Requests onSnapshot error:", err);
-    friendRequestsContainer.innerHTML = "<div class='small' style='color:crimson'>Permission error loading requests</div>";
+    if (friendRequestsContainer) {
+      friendRequestsContainer.innerHTML = "<div class='small' style='color:crimson'>Permission error loading requests</div>";
+    }
   });
 }
 
@@ -386,8 +445,12 @@ function startIncomingRequestsListener(user) {
 */
 function startOutgoingRequestsListener(user) {
   if (!user) return;
-  if (unsubscriptions.outgoingRequests) return;
+  if (unsubscriptions.outgoingRequests) {
+    console.log("Outgoing requests listener already active");
+    return;
+  }
 
+  console.log("Starting outgoing requests listener");
   const q = query(
     collection(db, "friendRequests"),
     where("fromUid", "==", user.uid),
@@ -397,6 +460,8 @@ function startOutgoingRequestsListener(user) {
   unsubscriptions.outgoingRequests = onSnapshot(q, async snapshot => {
     try {
       if (snapshot.empty) return;
+      console.log("Processing", snapshot.docs.length, "accepted outgoing requests");
+      
       for (const d of snapshot.docs) {
         const data = d.data();
         const toUid = data.toUid;
@@ -410,6 +475,7 @@ function startOutgoingRequestsListener(user) {
 
           // Mark request as processed so we don't apply again
           await updateDoc(doc(db, "friendRequests", d.id), { processed: true, processedAt: serverTimestamp() });
+          console.log("Processed accepted request from", toUid);
         } catch (err) {
           console.error("Outgoing request processing failed for", d.id, err);
         }
@@ -425,8 +491,12 @@ function startOutgoingRequestsListener(user) {
 /* ===== User doc listener for friends & topbar updates ===== */
 function startUserDocListener(user) {
   if (!user) return;
-  if (unsubscriptions.userDoc) return;
+  if (unsubscriptions.userDoc) {
+    console.log("User doc listener already active");
+    return;
+  }
 
+  console.log("Starting user doc listener");
   const userRef = doc(db, "users", user.uid);
   unsubscriptions.userDoc = onSnapshot(userRef, async snap => {
     if (!snap.exists()) {
@@ -439,54 +509,63 @@ function startUserDocListener(user) {
 
     // Update topbar
     if (meAvatarSmall) meAvatarSmall.src = data.photoURL || defaultAvatar();
-    if (meName) meName.textContent = data.username || (auth.currentUser?.email || "User");
-    if (mePreview) mePreview.style.display = "inline-flex";
-    if (myProfileBtn) myProfileBtn.style.display = "inline-block";
-    if (logoutBtn) logoutBtn.style.display = "inline-block";
-    if (authBtn) authBtn.style.display = "none";
-    if (friendsContainer) friendsContainer.style.display = "block";
-    if (chatContainer) chatContainer.style.display = "block";
+    if (meName) meName.textContent = data.username || (auth.currentUser?.email ? auth.currentUser.email.split("@")[0] : "User");
+    
+    // Ensure UI is visible
+    showSignedInState(user);
 
     // Render friends list
     try {
       const friends = Array.isArray(data.friends) ? data.friends : [];
-      friendsList.innerHTML = "";
-      if (!friends.length) {
-        friendsList.innerHTML = "<div class='small'>No friends yet</div>";
-      } else {
-        await Promise.all(friends.map(uid => fetchProfile(uid)));
-        for (const uid of friends) {
-          const p = profileCache[uid] || { username: uid, photoURL: "" };
-          if (friendItemTemplate) {
-            const clone = friendItemTemplate.content.cloneNode(true);
-            const img = clone.querySelector(".friend-avatar");
-            const nameEl = clone.querySelector(".friend-name");
-            img.src = p.photoURL || defaultAvatar();
-            nameEl.textContent = p.username || uid;
-            nameEl.setAttribute("data-uid", uid);
-            img.setAttribute("data-uid", uid);
+      console.log("Rendering", friends.length, "friends");
+      
+      if (friendsList) {
+        friendsList.innerHTML = "";
+        if (!friends.length) {
+          friendsList.innerHTML = "<div class='small'>No friends yet</div>";
+        } else {
+          await Promise.all(friends.map(uid => fetchProfile(uid)));
+          for (const uid of friends) {
+            const p = profileCache[uid] || { username: uid, photoURL: "" };
+            if (friendItemTemplate) {
+              const clone = friendItemTemplate.content.cloneNode(true);
+              const img = clone.querySelector(".friend-avatar");
+              const nameEl = clone.querySelector(".friend-name");
+              if (img) img.src = p.photoURL || defaultAvatar();
+              if (nameEl) {
+                nameEl.textContent = p.username || uid;
+                nameEl.setAttribute("data-uid", uid);
+              }
+              if (img) img.setAttribute("data-uid", uid);
 
-            const tempContainer = document.createElement("div");
-            tempContainer.appendChild(clone);
-            const appended = tempContainer.firstElementChild;
-            appended.addEventListener("click", () => openProfile(uid));
-            friendsList.appendChild(appended);
-          } else {
-            const li = document.createElement("li");
-            li.className = "friend-item";
-            li.innerHTML = `<img src="${p.photoURL || defaultAvatar()}" class="avatar-small" /><span>${escapeHtml(p.username || uid)}</span>`;
-            li.addEventListener("click", () => openProfile(uid));
-            friendsList.appendChild(li);
+              const tempContainer = document.createElement("div");
+              tempContainer.appendChild(clone);
+              const appended = tempContainer.firstElementChild;
+              if (appended) {
+                appended.addEventListener("click", () => openProfile(uid));
+                friendsList.appendChild(appended);
+              }
+            } else {
+              const li = document.createElement("li");
+              li.className = "friend-item";
+              li.innerHTML = `<img src="${p.photoURL || defaultAvatar()}" class="avatar-small" /><span>${escapeHtml(p.username || uid)}</span>`;
+              li.addEventListener("click", () => openProfile(uid));
+              friendsList.appendChild(li);
+            }
           }
         }
       }
     } catch (err) {
       console.error("Error rendering friends", err);
-      friendsList.innerHTML = "<div class='small'>Failed to load friends</div>";
+      if (friendsList) {
+        friendsList.innerHTML = "<div class='small'>Failed to load friends</div>";
+      }
     }
   }, err => {
     console.error("User doc snapshot error:", err);
-    if (friendsList) friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
+    if (friendsList) {
+      friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
+    }
   });
 }
 
@@ -551,6 +630,14 @@ setTimeout(() => {
     console.warn("Auth check timed out; redirecting to auth.html");
     window.location.replace("auth.html");
   }
-}, 10000);
+}, 15000); // Increased timeout to 15 seconds
+
+// Also check if user exists but UI isn't showing after 3 seconds
+setTimeout(() => {
+  if (authReady && auth.currentUser && chatContainer && chatContainer.style.display === "none") {
+    console.warn("User signed in but UI not showing, forcing update");
+    showSignedInState(auth.currentUser);
+  }
+}, 3000);
 
 console.log("script.js loaded — topbar controls, chat, friends and friend-request listeners active.");
