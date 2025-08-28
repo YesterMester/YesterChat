@@ -31,6 +31,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 
 // --- DOM Elements ---
+// This script assumes it's running on a page with these elements.
 const profileAvatar = document.getElementById("profileAvatar");
 const profileUsername = document.getElementById("profileUsername");
 const profileEmail = document.getElementById("profileEmail");
@@ -68,15 +69,20 @@ function setButtonLoading(btn, isLoading, text = "Save") {
 export function initAuthListener() {
   if (!auth || !db) {
     console.error(
-      "Firebase FATAL ERROR: The 'auth' or 'db' object is not being imported correctly from firebase.js. Please check your firebase.js file to ensure you are exporting 'auth' and 'db' properly."
+      "Firebase FATAL ERROR: The 'auth' or 'db' object is not being imported correctly from firebase.js."
     );
-    profileUsername.textContent = "Configuration Error";
-    profileBio.textContent = "Could not connect to the database. Check the console.";
+    if (profileUsername) profileUsername.textContent = "Configuration Error";
     return;
   }
 
   onAuthStateChanged(auth, async (user) => {
     if (user) {
+      // This part of the code should only run on pages where profile elements exist.
+      // If profileUsername is not on the page, we can assume this script shouldn't be running fully.
+      if (!profileUsername) {
+        console.log("Profile script loaded on a non-profile page. Halting execution.");
+        return;
+      }
       try {
         currentUser = user;
         const viewedUid = getUidFromUrl() || currentUser.uid;
@@ -85,10 +91,15 @@ export function initAuthListener() {
       } catch (error) {
         console.error("Failed to initialize profile page:", error);
         profileUsername.textContent = "Error Loading Profile";
-        profileBio.textContent = "Could not load user data. Please check the console and try again.";
+        profileBio.textContent = "Could not load user data. Check console.";
       }
     } else {
-      window.location.replace("auth.html");
+      // **FIX:** Added a safety check to prevent infinite redirect loops.
+      // It now checks if we are already on the auth page before trying to redirect.
+      const isAuthPage = window.location.pathname.endsWith("auth.html");
+      if (!isAuthPage) {
+        window.location.replace("auth.html");
+      }
     }
   });
 }
@@ -124,7 +135,6 @@ async function loadProfilePage(uid) {
   }
 
   viewedProfileData = { uid, ...docSnap.data() };
-
   profileAvatar.src = viewedProfileData.photoURL || defaultAvatar();
   profileUsername.textContent = viewedProfileData.username;
   profileBio.textContent = viewedProfileData.bio;
@@ -141,11 +151,9 @@ function renderOwnerView() {
   friendsListContainer.style.display = "block";
   editArea.style.display = "block";
   profileActions.innerHTML = `<div class="small">This is your public profile. Use the form to make changes.</div>`;
-
   editUsername.value = viewedProfileData.username;
   editBio.value = viewedProfileData.bio;
   editAvatarPreview.src = viewedProfileData.photoURL || defaultAvatar();
-
   startFriendsListener();
 }
 
@@ -291,6 +299,7 @@ async function sendFriendRequest(targetUid, btn) {
 async function removeFriend(friendUid, btn) {
   if (!confirm(`Are you sure you want to unfriend ${viewedProfileData.username}?`)) return;
 
+  setButton.disabled = true;
   setButtonLoading(btn, true, "Unfriend");
   try {
     const currentUserRef = doc(db, "users", currentUser.uid);
@@ -303,6 +312,7 @@ async function removeFriend(friendUid, btn) {
   } catch (error) {
     console.error("Unfriend error:", error);
     alert("Failed to remove friend.");
+  } finally {
     setButtonLoading(btn, false, "Unfriend");
   }
 }
@@ -341,7 +351,7 @@ async function renderFriendsList(friendUids) {
       if (docSnap.exists()) {
         const friend = { uid: docSnap.id, ...docSnap.data() };
         const li = document.createElement("li");
-        li.className = "friend-item";
+li.className = "friend-item";
         li.innerHTML = `
           <img src="${friend.photoURL || defaultAvatar()}" alt="${friend.username}" />
           <span>${friend.username || "Unknown"}</span>
