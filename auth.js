@@ -1,5 +1,12 @@
+import { auth, db } from "./firebase.js";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } 
+  from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { doc, setDoc, serverTimestamp } 
+  from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+
 document.addEventListener("DOMContentLoaded", () => {
 
+  const signupUsername = document.getElementById("signup-username");
   const signupEmail = document.getElementById("signup-email");
   const signupPass = document.getElementById("signup-pass");
   const signupBtn = document.getElementById("signup-btn");
@@ -12,9 +19,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Sign Up ---
   signupBtn.addEventListener("click", async () => {
+    const username = signupUsername.value.trim();
     const email = signupEmail.value.trim();
     const pass = signupPass.value.trim();
 
+    if (!username || username.length < 2) {
+      signupMsg.textContent = "Username must be at least 2 characters.";
+      signupMsg.style.color = "red";
+      return;
+    }
     if (!email || !pass) {
       signupMsg.textContent = "Please enter email and password.";
       signupMsg.style.color = "red";
@@ -26,8 +39,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const user = userCredential.user;
 
       await setDoc(doc(db, "users", user.uid), {
-        username: email.split("@")[0],
-        usernameLower: email.split("@")[0].toLowerCase(),
+        username: username,
+        usernameLower: username.toLowerCase(),
         bio: "",
         photoURL: "",
         friends: [],
@@ -37,6 +50,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       signupMsg.textContent = "✅ Account created successfully!";
       signupMsg.style.color = "green";
+      signupUsername.value = "";
       signupEmail.value = "";
       signupPass.value = "";
 
