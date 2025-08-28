@@ -1,4 +1,4 @@
-// profile.js — FULLY FIXED & UPDATED
+/* ---------- Part 1: Imports, DOM, Helpers & Auth ---------- */
 
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
@@ -17,7 +17,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import { onAuthStateChanged, updateProfile as updateAuthProfile } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 
-/* ---------- DOM ---------- */
+/* ---------- DOM Elements ---------- */
 const profileAvatar = document.getElementById("profileAvatar");
 const profileUsername = document.getElementById("profileUsername");
 const profileEmail = document.getElementById("profileEmail");
@@ -33,7 +33,6 @@ const saveProfileBtn = document.getElementById("saveProfileBtn");
 const cancelEditBtn = document.getElementById("cancelEditBtn");
 const editMsg = document.getElementById("editMsg");
 
-/* Topbar elements */
 const topbarName = document.getElementById("meName");
 const topbarAvatar = document.getElementById("meAvatarSmall");
 
@@ -55,7 +54,7 @@ let currentUser = null;
 let viewedUid = null;
 let viewedProfileData = null;
 
-/* ---------- Auth init ---------- */
+/* ---------- Auth Listener ---------- */
 export function initAuthListener() {
   onAuthStateChanged(auth, async (user) => {
     if (!user) {
@@ -67,14 +66,14 @@ export function initAuthListener() {
     try {
       await ensureUserDocExists(currentUser);
       await renderProfile(viewedUid);
-      startLiveFriendsListener();
+      startLiveFriendsListener(); // Live updates for friends
     } catch (err) {
       console.error("Auth init error in profile.js:", err);
     }
   });
 }
 
-/* ---------- Ensure user doc exists ---------- */
+/* ---------- Ensure user document exists ---------- */
 export async function ensureUserDocExists(user) {
   if (!user) return;
   const ref = doc(db, "users", user.uid);
@@ -93,7 +92,12 @@ export async function ensureUserDocExists(user) {
   }
 }
 
-/* ---------- Render profile ---------- */
+/* ---------- Export init ---------- */
+initAuthListener();
+
+/* ---------- Part 2: Profile Rendering & Actions ---------- */
+
+/* ---------- Render Profile ---------- */
 export async function renderProfile(uid) {
   if (!uid) return;
 
@@ -272,11 +276,17 @@ export function setupOwnerActions() {
   info.textContent = "This is your profile. Use the form below to update username, bio, and photo.";
   profileActions.appendChild(info);
 }
+/* ---------- Part 3: Friend Requests & Live Updates ---------- */
 
 /* ---------- Friend Requests ---------- */
 export function listenForFriendRequests(callback) {
   if (!currentUser) return () => {};
-  const q = query(collection(db, "friendRequests"), where("toUid", "==", currentUser.uid), where("status", "==", "pending"));
+  const q = query(
+    collection(db, "friendRequests"),
+    where("toUid", "==", currentUser.uid),
+    where("status", "==", "pending")
+  );
+
   const unsubscribe = onSnapshot(q, async (snapshot) => {
     const requests = [];
     for (const docSnap of snapshot.docs) {
@@ -284,7 +294,7 @@ export function listenForFriendRequests(callback) {
       let fromUser = null;
       try {
         const fromSnap = await getDoc(doc(db, "users", req.fromUid));
-        if (fromSnap.exists()) fromUser = fromSnap.data();
+        if (fromSnap.exists()) fromUser = { uid: fromSnap.id, ...fromSnap.data() };
       } catch {}
       requests.push({ id: docSnap.id, ...req, fromUser });
     }
@@ -294,16 +304,24 @@ export function listenForFriendRequests(callback) {
 }
 
 export async function acceptFriendRequest(requestId, fromUid) {
+  // Update request status
   await updateDoc(doc(db, "friendRequests", requestId), { status: "accepted", respondedAt: serverTimestamp() });
+
+  // Add to current user friends
   const myRef = doc(db, "users", currentUser.uid);
   const mySnap = await getDoc(myRef);
   const myFriends = mySnap.exists() ? mySnap.data().friends || [] : [];
-  if (!myFriends.includes(fromUid)) await updateDoc(myRef, { friends: Array.from(new Set([...myFriends, fromUid])), updatedAt: serverTimestamp() });
+  if (!myFriends.includes(fromUid)) {
+    await updateDoc(myRef, { friends: Array.from(new Set([...myFriends, fromUid])), updatedAt: serverTimestamp() });
+  }
 
+  // Add current user to sender's friends
   const theirRef = doc(db, "users", fromUid);
   const theirSnap = await getDoc(theirRef);
   const theirFriends = theirSnap.exists() ? theirSnap.data().friends || [] : [];
-  if (!theirFriends.includes(currentUser.uid)) await updateDoc(theirRef, { friends: Array.from(new Set([...theirFriends, currentUser.uid])), updatedAt: serverTimestamp() });
+  if (!theirFriends.includes(currentUser.uid)) {
+    await updateDoc(theirRef, { friends: Array.from(new Set([...theirFriends, currentUser.uid])), updatedAt: serverTimestamp() });
+  }
 }
 
 export async function declineFriendRequest(requestId) {
@@ -313,28 +331,60 @@ export async function declineFriendRequest(requestId) {
 /* ---------- Mutual Unfriend Helper ---------- */
 export async function removeFriendMutually(uidToRemove) {
   if (!currentUser || !uidToRemove) return;
+
+  // Remove from current user
   const currentRef = doc(db, "users", currentUser.uid);
   const currentSnap = await getDoc(currentRef);
   const currentFriends = currentSnap.exists() ? currentSnap.data().friends || [] : [];
-  if (currentFriends.includes(uidToRemove)) await updateDoc(currentRef, { friends: currentFriends.filter(x => x !== uidToRemove), updatedAt: serverTimestamp() });
+  if (currentFriends.includes(uidToRemove)) {
+    await updateDoc(currentRef, {
+      friends: currentFriends.filter(x => x !== uidToRemove),
+      updatedAt: serverTimestamp()
+    });
+  }
 
+  // Remove from other user
   const otherRef = doc(db, "users", uidToRemove);
   const otherSnap = await getDoc(otherRef);
   const otherFriends = otherSnap.exists() ? otherSnap.data().friends || [] : [];
-  if (otherFriends.includes(currentUser.uid)) await updateDoc(otherRef, { friends: otherFriends.filter(x => x !== currentUser.uid), updatedAt: serverTimestamp() });
+  if (otherFriends.includes(currentUser.uid)) {
+    await updateDoc(otherRef, {
+      friends: otherFriends.filter(x => x !== currentUser.uid),
+      updatedAt: serverTimestamp()
+    });
+  }
 }
 
 /* ---------- Live Friends Update ---------- */
 let friendsUnsub = null;
-function startLiveFriendsListener() {
+export function startLiveFriendsListener() {
   if (!currentUser) return;
   if (friendsUnsub) friendsUnsub();
+
   const userRef = doc(db, "users", currentUser.uid);
   friendsUnsub = onSnapshot(userRef, async (snap) => {
     if (!snap.exists()) return;
     const friendsArr = Array.isArray(snap.data().friends) ? snap.data().friends : [];
-    updateFriendListUI(friendsArr); // implement your DOM update here
+    updateFriendListUI(friendsArr); // implement your DOM rendering of friend list
   });
+}
+
+/* ---------- Fetch Friends ---------- */
+export async function fetchFriends(callback) {
+  if (!currentUser) return callback([]);
+  const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+  if (!userSnap.exists()) return callback([]);
+  const friends = Array.isArray(userSnap.data().friends) ? userSnap.data().friends : [];
+  if (!friends.length) return callback([]);
+
+  const friendProfiles = [];
+  for (const uid of friends) {
+    try {
+      const fSnap = await getDoc(doc(db, "users", uid));
+      if (fSnap.exists()) friendProfiles.push({ uid, ...fSnap.data() });
+    } catch {}
+  }
+  callback(friendProfiles);
 }
 
 /* ---------- Utility ---------- */
@@ -342,11 +392,9 @@ export function getCurrentUser() {
   return currentUser;
 }
 
-/* ---------- Initialize ---------- */
-initAuthListener();
-
-/* ---------- UI Update Placeholder ----------
+/* ---------- Example UI update placeholder ----------
 function updateFriendListUI(friendsArr) {
+  // Replace with your actual DOM update logic
   console.log("Live friend list updated:", friendsArr);
 }
-----------------------------------------------------
+---------------------------------------------------- */
