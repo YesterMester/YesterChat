@@ -1,87 +1,82 @@
-import { auth, db } from "./firebase.js";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } 
-  from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-import { doc, setDoc, serverTimestamp } 
-  from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+document.addEventListener("DOMContentLoaded", () => {
 
-// --- Elements ---
-const signupEmail = document.getElementById("signup-email");
-const signupPass = document.getElementById("signup-pass");
-const signupBtn = document.getElementById("signup-btn");
-const signupMsg = document.getElementById("signup-msg");
+  const signupEmail = document.getElementById("signup-email");
+  const signupPass = document.getElementById("signup-pass");
+  const signupBtn = document.getElementById("signup-btn");
+  const signupMsg = document.getElementById("signup-msg");
 
-const signinEmail = document.getElementById("signin-email");
-const signinPass = document.getElementById("signin-pass");
-const signinBtn = document.getElementById("signin-btn");
-const signinMsg = document.getElementById("signin-msg");
+  const signinEmail = document.getElementById("signin-email");
+  const signinPass = document.getElementById("signin-pass");
+  const signinBtn = document.getElementById("signin-btn");
+  const signinMsg = document.getElementById("signin-msg");
 
-// --- Sign Up ---
-signupBtn.addEventListener("click", async () => {
-  const email = signupEmail.value.trim();
-  const pass = signupPass.value.trim();
+  // --- Sign Up ---
+  signupBtn.addEventListener("click", async () => {
+    const email = signupEmail.value.trim();
+    const pass = signupPass.value.trim();
 
-  if (!email || !pass) {
-    signupMsg.textContent = "Please enter email and password.";
-    signupMsg.style.color = "red";
-    return;
-  }
+    if (!email || !pass) {
+      signupMsg.textContent = "Please enter email and password.";
+      signupMsg.style.color = "red";
+      return;
+    }
 
-  try {
-    // 1️⃣ Create Firebase Auth user
-    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
-    const user = userCredential.user;
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+      const user = userCredential.user;
 
-    // 2️⃣ Create Firestore user profile document
-    await setDoc(doc(db, "users", user.uid), {
-      username: email.split("@")[0],      // default username
-      usernameLower: email.split("@")[0].toLowerCase(),
-      bio: "",
-      photoURL: "",
-      friends: [],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
+      await setDoc(doc(db, "users", user.uid), {
+        username: email.split("@")[0],
+        usernameLower: email.split("@")[0].toLowerCase(),
+        bio: "",
+        photoURL: "",
+        friends: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
 
-    signupMsg.textContent = "✅ Account created successfully!";
-    signupMsg.style.color = "green";
-    signupEmail.value = "";
-    signupPass.value = "";
+      signupMsg.textContent = "✅ Account created successfully!";
+      signupMsg.style.color = "green";
+      signupEmail.value = "";
+      signupPass.value = "";
 
-    setTimeout(() => window.location.href = "index.html", 1000);
+      setTimeout(() => window.location.href = "index.html", 1000);
 
-  } catch (err) {
-    signupMsg.textContent = "❌ " + err.message;
-    signupMsg.style.color = "red";
-    signupPass.value = "";
-    console.error(err);
-  }
-});
+    } catch (err) {
+      signupMsg.textContent = "❌ " + err.message;
+      signupMsg.style.color = "red";
+      signupPass.value = "";
+      console.error(err);
+    }
+  });
 
-// --- Sign In ---
-signinBtn.addEventListener("click", async () => {
-  const email = signinEmail.value.trim();
-  const pass = signinPass.value.trim();
+  // --- Sign In ---
+  signinBtn.addEventListener("click", async () => {
+    const email = signinEmail.value.trim();
+    const pass = signinPass.value.trim();
 
-  if (!email || !pass) {
-    signinMsg.textContent = "Please enter email and password.";
-    signinMsg.style.color = "red";
-    return;
-  }
+    if (!email || !pass) {
+      signinMsg.textContent = "Please enter email and password.";
+      signinMsg.style.color = "red";
+      return;
+    }
 
-  try {
-    await signInWithEmailAndPassword(auth, email, pass);
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
 
-    signinMsg.textContent = "✅ Logged in successfully!";
-    signinMsg.style.color = "green";
-    signinEmail.value = "";
-    signinPass.value = "";
+      signinMsg.textContent = "✅ Logged in successfully!";
+      signinMsg.style.color = "green";
+      signinEmail.value = "";
+      signinPass.value = "";
 
-    setTimeout(() => window.location.href = "index.html", 500);
+      setTimeout(() => window.location.href = "index.html", 500);
 
-  } catch (err) {
-    signinMsg.textContent = "❌ " + err.message;
-    signinMsg.style.color = "red";
-    signinPass.value = "";
-    console.error(err);
-  }
+    } catch (err) {
+      signinMsg.textContent = "❌ " + err.message;
+      signinMsg.style.color = "red";
+      signinPass.value = "";
+      console.error(err);
+    }
+  });
+
 });
