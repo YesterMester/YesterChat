@@ -1,4 +1,4 @@
-// script.js — combined, fixed friend-request flow, outgoing listener to apply accepted requests safely
+// script.js — Fixed with extensive debugging for auth state issues
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import {
@@ -19,31 +19,64 @@ import {
 
 import { uploadProfileImage } from "./cloudinary.js"; // still needed by profile page
 
+/* ===== Debug Logging ===== */
+function debugLog(message, data = null) {
+  console.log(`[SCRIPT DEBUG] ${message}`, data || '');
+}
+
+function debugError(message, error = null) {
+  console.error(`[SCRIPT ERROR] ${message}`, error || '');
+}
+
 /* ===== DOM elements ===== */
-const mePreview = document.getElementById("mePreview");
-const meAvatarSmall = document.getElementById("meAvatarSmall");
-const meName = document.getElementById("meName");
-const myProfileBtn = document.getElementById("myProfileBtn");
+let domElements = {};
 
-const authBtn = document.getElementById("authBtn");
-const logoutBtn = document.getElementById("logoutBtn");
-const signedOutNotice = document.getElementById("signedOutNotice");
+function initializeDOMElements() {
+  domElements = {
+    mePreview: document.getElementById("mePreview"),
+    meAvatarSmall: document.getElementById("meAvatarSmall"),
+    meName: document.getElementById("meName"),
+    myProfileBtn: document.getElementById("myProfileBtn"),
+    authBtn: document.getElementById("authBtn"),
+    logoutBtn: document.getElementById("logoutBtn"),
+    signedOutNotice: document.getElementById("signedOutNotice"),
+    friendsContainer: document.getElementById("friendsContainer"),
+    friendsList: document.getElementById("friendsList"),
+    friendRequestsContainer: document.getElementById("friendRequests"),
+    chatContainer: document.getElementById("chatContainer"),
+    chatBox: document.getElementById("chat"),
+    msgInput: document.getElementById("msgInput"),
+    sendBtn: document.getElementById("sendBtn"),
+    chatMessageTemplate: document.getElementById("chatMessageTemplate"),
+    friendItemTemplate: document.getElementById("friendItemTemplate")
+  };
 
-const friendsContainer = document.getElementById("friendsContainer");
-const friendsList = document.getElementById("friendsList");
-const friendRequestsContainer = document.getElementById("friendRequests");
+  debugLog("DOM Elements initialized:", {
+    mePreview: !!domElements.mePreview,
+    meAvatarSmall: !!domElements.meAvatarSmall,
+    meName: !!domElements.meName,
+    myProfileBtn: !!domElements.myProfileBtn,
+    authBtn: !!domElements.authBtn,
+    logoutBtn: !!domElements.logoutBtn,
+    signedOutNotice: !!domElements.signedOutNotice,
+    friendsContainer: !!domElements.friendsContainer,
+    friendsList: !!domElements.friendsList,
+    friendRequestsContainer: !!domElements.friendRequestsContainer,
+    chatContainer: !!domElements.chatContainer,
+    chatBox: !!domElements.chatBox,
+    msgInput: !!domElements.msgInput,
+    sendBtn: !!domElements.sendBtn,
+    chatMessageTemplate: !!domElements.chatMessageTemplate,
+    friendItemTemplate: !!domElements.friendItemTemplate
+  });
 
-const chatContainer = document.getElementById("chatContainer");
-const chatBox = document.getElementById("chat");
-const msgInput = document.getElementById("msgInput");
-const sendBtn = document.getElementById("sendBtn");
-
-const chatMessageTemplate = document.getElementById("chatMessageTemplate");
-const friendItemTemplate = document.getElementById("friendItemTemplate");
+  return domElements;
+}
 
 /* ===== State ===== */
 let authChecked = false;
 let authReady = false;
+let currentUser = null;
 let unsubscriptions = { chat: null, userDoc: null, incomingRequests: null, outgoingRequests: null };
 const profileCache = {}; // uid -> profile data cache
 
@@ -60,10 +93,11 @@ async function fetchProfile(uid) {
     const snap = await getDoc(doc(db, "users", uid));
     if (snap.exists()) {
       profileCache[uid] = snap.data();
+      debugLog(`Profile cached for ${uid}:`, profileCache[uid]);
       return profileCache[uid];
     }
   } catch (err) {
-    console.error("fetchProfile error", err);
+    debugError("fetchProfile error", err);
   }
   profileCache[uid] = { username: "Unknown", photoURL: "" };
   return profileCache[uid];
@@ -72,10 +106,12 @@ async function fetchProfile(uid) {
 /* ensure users/{uid} exists for the signed-in user */
 async function ensureMyUserDoc(user) {
   if (!user) return;
+  debugLog(`Ensuring user doc exists for ${user.uid}`);
   try {
     const ref = doc(db, "users", user.uid);
     const snap = await getDoc(ref);
     if (!snap.exists()) {
+      debugLog("User doc doesn't exist, creating...");
       const defaultUsername = user.email ? user.email.split("@")[0] : "User";
       await setDoc(ref, {
         username: defaultUsername,
@@ -93,155 +129,269 @@ async function ensureMyUserDoc(user) {
         photoURL: "",
         friends: []
       };
+      debugLog("User doc created");
     } else {
       profileCache[user.uid] = snap.data();
+      debugLog("User doc exists, cached profile");
     }
   } catch (err) {
-    console.warn("ensureMyUserDoc error:", err);
+    debugError("ensureMyUserDoc error:", err);
   }
 }
 
 /* Cleanup realtime listeners */
 function cleanupRealtime() {
+  debugLog("Cleaning up realtime listeners");
   Object.keys(unsubscriptions).forEach(k => {
     try { unsubscriptions[k]?.(); } catch (e) {}
     unsubscriptions[k] = null;
   });
   // clear UI sections
-  if (chatBox) chatBox.innerHTML = "";
-  if (friendsList) friendsList.innerHTML = "";
-  if (friendRequestsContainer) friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
+  if (domElements.chatBox) domElements.chatBox.innerHTML = "";
+  if (domElements.friendsList) domElements.friendsList.innerHTML = "";
+  if (domElements.friendRequestsContainer) domElements.friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
 }
 
 /* Show signed out state */
 function showSignedOutState() {
-  console.log("Showing signed out state");
-  if (mePreview) mePreview.style.display = "none";
-  if (myProfileBtn) { 
-    myProfileBtn.style.display = "none"; 
-    myProfileBtn.onclick = null; 
+  debugLog("=== SHOWING SIGNED OUT STATE ===");
+  
+  if (domElements.mePreview) {
+    domElements.mePreview.style.display = "none";
+    debugLog("Hidden mePreview");
   }
-  if (logoutBtn) logoutBtn.style.display = "none";
-  if (authBtn) authBtn.style.display = "inline-block";
-  if (signedOutNotice) signedOutNotice.style.display = "block";
-  if (chatContainer) chatContainer.style.display = "none";
-  if (friendsContainer) friendsContainer.style.display = "none";
+  
+  if (domElements.myProfileBtn) { 
+    domElements.myProfileBtn.style.display = "none"; 
+    domElements.myProfileBtn.onclick = null; 
+    debugLog("Hidden myProfileBtn");
+  }
+  
+  if (domElements.logoutBtn) {
+    domElements.logoutBtn.style.display = "none";
+    debugLog("Hidden logoutBtn");
+  }
+  
+  if (domElements.authBtn) {
+    domElements.authBtn.style.display = "inline-block";
+    debugLog("Shown authBtn");
+  }
+  
+  if (domElements.signedOutNotice) {
+    domElements.signedOutNotice.style.display = "block";
+    debugLog("Shown signedOutNotice");
+  }
+  
+  if (domElements.chatContainer) {
+    domElements.chatContainer.style.display = "none";
+    debugLog("Hidden chatContainer");
+  }
+  
+  if (domElements.friendsContainer) {
+    domElements.friendsContainer.style.display = "none";
+    debugLog("Hidden friendsContainer");
+  }
   
   cleanupRealtime();
+  debugLog("=== SIGNED OUT STATE COMPLETE ===");
 }
 
 /* Show signed in state */
 function showSignedInState(user) {
-  console.log("Showing signed in state for user:", user.uid);
-  if (mePreview) mePreview.style.display = "inline-flex";
-  if (myProfileBtn) { 
-    myProfileBtn.style.display = "inline-block"; 
-    myProfileBtn.onclick = () => openProfile(user.uid); 
+  debugLog("=== SHOWING SIGNED IN STATE ===", { uid: user.uid });
+  
+  if (domElements.mePreview) {
+    domElements.mePreview.style.display = "inline-flex";
+    debugLog("Shown mePreview");
   }
-  if (logoutBtn) logoutBtn.style.display = "inline-block";
-  if (authBtn) authBtn.style.display = "none";
-  if (signedOutNotice) signedOutNotice.style.display = "none";
-  if (friendsContainer) friendsContainer.style.display = "block";
-  if (chatContainer) chatContainer.style.display = "block";
+  
+  if (domElements.myProfileBtn) { 
+    domElements.myProfileBtn.style.display = "inline-block"; 
+    domElements.myProfileBtn.onclick = () => openProfile(user.uid); 
+    debugLog("Shown myProfileBtn");
+  }
+  
+  if (domElements.logoutBtn) {
+    domElements.logoutBtn.style.display = "inline-block";
+    debugLog("Shown logoutBtn");
+  }
+  
+  if (domElements.authBtn) {
+    domElements.authBtn.style.display = "none";
+    debugLog("Hidden authBtn");
+  }
+  
+  if (domElements.signedOutNotice) {
+    domElements.signedOutNotice.style.display = "none";
+    debugLog("Hidden signedOutNotice");
+  }
+  
+  if (domElements.friendsContainer) {
+    domElements.friendsContainer.style.display = "block";
+    debugLog("Shown friendsContainer");
+  }
+  
+  if (domElements.chatContainer) {
+    domElements.chatContainer.style.display = "block";
+    debugLog("Shown chatContainer");
+  }
+  
+  debugLog("=== SIGNED IN STATE COMPLETE ===");
+}
+
+/* Force refresh UI state based on current auth */
+function forceUIUpdate() {
+  debugLog("=== FORCING UI UPDATE ===");
+  const user = auth?.currentUser;
+  
+  if (user) {
+    debugLog("User exists, forcing signed in state", { uid: user.uid });
+    showSignedInState(user);
+    
+    // Update profile info if cached
+    const profile = profileCache[user.uid];
+    if (profile) {
+      if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = profile.photoURL || defaultAvatar();
+      if (domElements.meName) domElements.meName.textContent = profile.username || user.email?.split("@")[0] || "User";
+      debugLog("Updated profile info from cache");
+    }
+  } else {
+    debugLog("No user, forcing signed out state");
+    showSignedOutState();
+  }
 }
 
 /* ===== Auth State Handling ===== */
-onAuthStateChanged(auth, async (user) => {
-  authChecked = true;
-  authReady = true;
-  console.log("Auth state changed:", user ? user.uid : null);
-
-  if (!user) {
-    // Signed out: hide profile controls & show auth button
-    showSignedOutState();
-
-    // friendly redirect to auth page after 8s (as your original UX did)
-    setTimeout(() => {
-      if (!auth.currentUser && authReady) {
-        console.log("Redirecting to auth.html - no user found");
-        window.location.replace("auth.html");
-      }
-    }, 8000);
-
-    return;
-  }
-
-  // Signed in
-  try {
-    console.log("User is signed in, initializing...");
-    await ensureMyUserDoc(user);
-
-    const me = profileCache[user.uid] || await fetchProfile(user.uid);
+function setupAuthStateListener() {
+  debugLog("Setting up auth state listener");
+  
+  onAuthStateChanged(auth, async (user) => {
+    authChecked = true;
+    authReady = true;
+    currentUser = user;
     
-    // Update topbar immediately
-    if (meAvatarSmall) meAvatarSmall.src = me.photoURL || defaultAvatar();
-    if (meName) meName.textContent = me.username || (user.displayName || (user.email ? user.email.split("@")[0] : "User"));
+    debugLog("=== AUTH STATE CHANGED ===", user ? { uid: user.uid, email: user.email } : "null");
 
-    // Show signed in state
-    showSignedInState(user);
+    if (!user) {
+      debugLog("User signed out");
+      showSignedOutState();
 
-    // start listeners
-    startUserDocListener(user);
-    startChatListener(user);
-    startIncomingRequestsListener(user);
-    startOutgoingRequestsListener(user);
+      // Friendly redirect to auth page after 8s
+      setTimeout(() => {
+        if (!auth.currentUser && authReady) {
+          debugLog("Redirecting to auth.html - no user found");
+          window.location.replace("auth.html");
+        }
+      }, 8000);
+      return;
+    }
 
-    console.log("User initialization complete");
-  } catch (err) {
-    console.error("Post-auth initialization error:", err);
-  }
-});
-
-/* ===== Auth Buttons ===== */
-if (authBtn) {
-  authBtn.addEventListener("click", () => {
-    console.log("Auth button clicked");
-    window.location.href = "auth.html";
-  });
-}
-
-if (myProfileBtn) {
-  myProfileBtn.addEventListener("click", () => {
-    const uid = auth.currentUser?.uid;
-    if (uid) openProfile(uid);
-  });
-}
-
-if (logoutBtn) {
-  logoutBtn.addEventListener("click", async () => {
+    // User signed in
     try {
-      console.log("Logging out...");
-      cleanupRealtime();
-      await signOut(auth);
-      window.location.replace("auth.html");
+      debugLog("User is signed in, initializing...");
+      await ensureMyUserDoc(user);
+
+      const me = profileCache[user.uid] || await fetchProfile(user.uid);
+      
+      // Update topbar immediately
+      if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = me.photoURL || defaultAvatar();
+      if (domElements.meName) domElements.meName.textContent = me.username || (user.displayName || (user.email ? user.email.split("@")[0] : "User"));
+
+      // Show signed in state
+      showSignedInState(user);
+
+      // Start listeners
+      startUserDocListener(user);
+      startChatListener(user);
+      startIncomingRequestsListener(user);
+      startOutgoingRequestsListener(user);
+
+      debugLog("=== USER INITIALIZATION COMPLETE ===");
     } catch (err) {
-      console.error("Logout failed:", err);
-      alert("Logout failed. See console.");
+      debugError("Post-auth initialization error:", err);
     }
   });
 }
 
+/* ===== Initialize Everything ===== */
+function initializeApp() {
+  debugLog("=== INITIALIZING APP ===");
+  
+  // Initialize DOM elements
+  initializeDOMElements();
+  
+  // Check if Firebase is ready
+  if (!auth || !db) {
+    debugError("Firebase not initialized!");
+    return;
+  }
+  
+  // Setup auth buttons
+  setupAuthButtons();
+  
+  // Setup auth state listener
+  setupAuthStateListener();
+  
+  // Force initial UI update after delay
+  setTimeout(forceUIUpdate, 1000);
+  
+  debugLog("=== APP INITIALIZATION COMPLETE ===");
+}
+
+/* ===== Auth Buttons Setup ===== */
+function setupAuthButtons() {
+  debugLog("Setting up auth buttons");
+  
+  if (domElements.authBtn) {
+    domElements.authBtn.addEventListener("click", () => {
+      debugLog("Auth button clicked");
+      window.location.href = "auth.html";
+    });
+  }
+
+  if (domElements.myProfileBtn) {
+    domElements.myProfileBtn.addEventListener("click", () => {
+      const uid = auth.currentUser?.uid;
+      if (uid) openProfile(uid);
+    });
+  }
+
+  if (domElements.logoutBtn) {
+    domElements.logoutBtn.addEventListener("click", async () => {
+      try {
+        debugLog("Logging out...");
+        cleanupRealtime();
+        await signOut(auth);
+        window.location.replace("auth.html");
+      } catch (err) {
+        debugError("Logout failed:", err);
+        alert("Logout failed. See console.");
+      }
+    });
+  }
+}
+
 /* ===== Chat Listener & Send ===== */
 function startChatListener(user) {
-  if (!user || !chatBox) return;
+  if (!user || !domElements.chatBox) return;
   if (unsubscriptions.chat) {
-    console.log("Chat listener already active");
+    debugLog("Chat listener already active");
     return;
   }
 
-  console.log("Starting chat listener");
+  debugLog("Starting chat listener");
   const messagesRef = collection(db, "servers", "defaultServer", "messages");
   const q = query(messagesRef, orderBy("timestamp"));
 
   unsubscriptions.chat = onSnapshot(q, async (snapshot) => {
     try {
-      console.log("Chat messages updated:", snapshot.docs.length);
+      debugLog("Chat messages updated:", snapshot.docs.length);
       const messages = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       const missing = new Set();
       messages.forEach(m => { if (m.senderId && !profileCache[m.senderId]) missing.add(m.senderId); });
       if (missing.size) await Promise.all(Array.from(missing).map(uid => fetchProfile(uid)));
 
-      chatBox.innerHTML = "";
+      domElements.chatBox.innerHTML = "";
       for (const m of messages) {
         const uid = m.senderId;
         const prof = uid ? (profileCache[uid] || { username: m.senderName || "Unknown", photoURL: m.senderPhotoURL || "" }) : { username: m.senderName || "Unknown", photoURL: "" };
@@ -249,8 +399,8 @@ function startChatListener(user) {
         const avatar = prof.photoURL || m.senderPhotoURL || defaultAvatar();
         const timeStr = m.timestamp && m.timestamp.toDate ? new Date(m.timestamp.toDate()).toLocaleString() : "";
 
-        if (chatMessageTemplate) {
-          const clone = chatMessageTemplate.content.cloneNode(true);
+        if (domElements.chatMessageTemplate) {
+          const clone = domElements.chatMessageTemplate.content.cloneNode(true);
           const img = clone.querySelector("img.avatar");
           const senderNameEl = clone.querySelector(".sender-name");
           const timeEl = clone.querySelector(".time");
@@ -273,39 +423,39 @@ function startChatListener(user) {
 
           const wrapper = document.createElement("div");
           wrapper.appendChild(clone);
-          chatBox.appendChild(wrapper.firstElementChild || wrapper);
+          domElements.chatBox.appendChild(wrapper.firstElementChild || wrapper);
         } else {
           const p = document.createElement("p");
           p.innerHTML = `<strong data-uid="${uid}">${escapeHtml(name)}</strong>: ${escapeHtml(m.text || "")}`;
-          chatBox.appendChild(p);
+          domElements.chatBox.appendChild(p);
         }
       }
-      chatBox.scrollTop = chatBox.scrollHeight;
+      domElements.chatBox.scrollTop = domElements.chatBox.scrollHeight;
     } catch (err) {
-      console.error("Chat render error:", err);
+      debugError("Chat render error:", err);
     }
   }, err => {
-    console.error("Chat onSnapshot error:", err);
-    if (err && err.code === "permission-denied" && chatBox) {
-      chatBox.innerHTML = "<div style='color:crimson'>Permission denied reading messages. Check Firestore rules.</div>";
+    debugError("Chat onSnapshot error:", err);
+    if (err && err.code === "permission-denied" && domElements.chatBox) {
+      domElements.chatBox.innerHTML = "<div style='color:crimson'>Permission denied reading messages. Check Firestore rules.</div>";
     }
   });
 
-  // name/avatar click -> profile
-  chatBox.addEventListener("click", (ev) => {
+  // Name/avatar click -> profile
+  domElements.chatBox.addEventListener("click", (ev) => {
     const t = ev.target;
     const uid = t.getAttribute?.("data-uid") || t.closest?.("[data-uid]")?.getAttribute("data-uid");
     if (uid) openProfile(uid);
   });
 
-  // send messages
-  if (sendBtn) {
-    sendBtn.onclick = async () => {
-      const text = (msgInput && msgInput.value || "").trim();
+  // Send messages
+  if (domElements.sendBtn) {
+    domElements.sendBtn.onclick = async () => {
+      const text = (domElements.msgInput && domElements.msgInput.value || "").trim();
       if (!text) return;
       if (!auth.currentUser) return alert("You must be signed in to send messages.");
       try {
-        await fetchProfile(auth.currentUser.uid); // ensure cached
+        await fetchProfile(auth.currentUser.uid);
         const me = profileCache[auth.currentUser.uid] || {};
         await addDoc(collection(db, "servers", "defaultServer", "messages"), {
           text,
@@ -314,39 +464,30 @@ function startChatListener(user) {
           senderPhotoURL: me.photoURL || "",
           timestamp: serverTimestamp()
         });
-        if (msgInput) msgInput.value = "";
+        if (domElements.msgInput) domElements.msgInput.value = "";
       } catch (err) {
-        console.error("Send message failed:", err);
+        debugError("Send message failed:", err);
         alert("Failed to send message. See console.");
       }
     };
 
-    if (msgInput) {
-      msgInput.addEventListener("keydown", (e) => {
+    if (domElements.msgInput) {
+      domElements.msgInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
-          sendBtn.click();
+          domElements.sendBtn.click();
         }
       });
     }
   }
 }
 
-/* ===== Incoming friend requests (what the current user receives) =====
-   Accept flow:
-     - Update the friendRequests doc to status 'accepted' (allowed)
-     - Add the sender UID to the current user's (acceptor) friends array (allowed)
-     - DON'T update the other user's users/{uid} doc here (that caused permission errors)
-   The sender's client listens to their outgoing requests and will add the acceptor to their own friends list when they see the request accepted.
-*/
+/* ===== Incoming friend requests listener ===== */
 function startIncomingRequestsListener(user) {
-  if (!user || !friendRequestsContainer) return;
-  if (unsubscriptions.incomingRequests) {
-    console.log("Incoming requests listener already active");
-    return;
-  }
+  if (!user || !domElements.friendRequestsContainer) return;
+  if (unsubscriptions.incomingRequests) return;
 
-  console.log("Starting incoming requests listener");
+  debugLog("Starting incoming requests listener");
   const q = query(
     collection(db, "friendRequests"),
     where("toUid", "==", user.uid),
@@ -355,10 +496,10 @@ function startIncomingRequestsListener(user) {
 
   unsubscriptions.incomingRequests = onSnapshot(q, async snapshot => {
     try {
-      console.log("Incoming requests updated:", snapshot.docs.length);
-      friendRequestsContainer.innerHTML = "";
+      debugLog("Incoming requests updated:", snapshot.docs.length);
+      domElements.friendRequestsContainer.innerHTML = "";
       if (snapshot.empty) {
-        friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
+        domElements.friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
         return;
       }
 
@@ -379,30 +520,22 @@ function startIncomingRequestsListener(user) {
         const decline = document.createElement("button");
         decline.textContent = "Decline";
 
-        // Accept friend request (recipient action)
         accept.addEventListener("click", async (ev) => {
           ev.stopPropagation();
           try {
-            // 1) update the friendRequests doc to accepted
             await updateDoc(doc(db, "friendRequests", d.id), {
               status: "accepted",
               respondedAt: serverTimestamp(),
-              acceptedBy: user.uid // optional helpful metadata
+              acceptedBy: user.uid
             });
-
-            // 2) add the sender to current user's friends array (allowed)
             const meRef = doc(db, "users", user.uid);
             await updateDoc(meRef, { friends: arrayUnion(fromUid) });
-
-            // UI will update from user doc snapshot listener
           } catch (err) {
-            console.error("Accept failed", err);
-            // This indicates a Firestore permission issue or network error.
+            debugError("Accept failed", err);
             alert("Accept failed. Check console for details.");
           }
         });
 
-        // Decline friend request (recipient action)
         decline.addEventListener("click", async (ev) => {
           ev.stopPropagation();
           try {
@@ -411,7 +544,7 @@ function startIncomingRequestsListener(user) {
               respondedAt: serverTimestamp()
             });
           } catch (err) {
-            console.error("Decline failed", err);
+            debugError("Decline failed", err);
             alert("Decline failed. Check console for details.");
           }
         });
@@ -423,34 +556,28 @@ function startIncomingRequestsListener(user) {
         wrapper.appendChild(btnWrap);
 
         wrapper.addEventListener("click", () => openProfile(fromUid));
-        friendRequestsContainer.appendChild(wrapper);
+        domElements.friendRequestsContainer.appendChild(wrapper);
       }
     } catch (err) {
-      console.error("Requests render error:", err);
-      if (friendRequestsContainer) {
-        friendRequestsContainer.innerHTML = "<div class='small'>Failed to load requests</div>";
+      debugError("Requests render error:", err);
+      if (domElements.friendRequestsContainer) {
+        domElements.friendRequestsContainer.innerHTML = "<div class='small'>Failed to load requests</div>";
       }
     }
   }, err => {
-    console.error("Requests onSnapshot error:", err);
-    if (friendRequestsContainer) {
-      friendRequestsContainer.innerHTML = "<div class='small' style='color:crimson'>Permission error loading requests</div>";
+    debugError("Requests onSnapshot error:", err);
+    if (domElements.friendRequestsContainer) {
+      domElements.friendRequestsContainer.innerHTML = "<div class='small' style='color:crimson'>Permission error loading requests</div>";
     }
   });
 }
 
-/* ===== Outgoing friend requests listener (for the sender) =====
-   Purpose: When someone you sent a request to accepts it (status -> 'accepted'), your client sees it,
-   then your client updates *your* users/{yourUid}.friends array (allowed) and marks the friendRequest as processed.
-*/
+/* ===== Outgoing friend requests listener ===== */
 function startOutgoingRequestsListener(user) {
   if (!user) return;
-  if (unsubscriptions.outgoingRequests) {
-    console.log("Outgoing requests listener already active");
-    return;
-  }
+  if (unsubscriptions.outgoingRequests) return;
 
-  console.log("Starting outgoing requests listener");
+  debugLog("Starting outgoing requests listener");
   const q = query(
     collection(db, "friendRequests"),
     where("fromUid", "==", user.uid),
@@ -460,56 +587,50 @@ function startOutgoingRequestsListener(user) {
   unsubscriptions.outgoingRequests = onSnapshot(q, async snapshot => {
     try {
       if (snapshot.empty) return;
-      console.log("Processing", snapshot.docs.length, "accepted outgoing requests");
+      debugLog("Processing", snapshot.docs.length, "accepted outgoing requests");
       
       for (const d of snapshot.docs) {
         const data = d.data();
         const toUid = data.toUid;
-        // Skip if we've already processed this acceptance
         if (data.processed === true) continue;
 
         try {
-          // Add the accepter (toUid) to my friends array (I am the sender, allowed)
           const myRef = doc(db, "users", user.uid);
           await updateDoc(myRef, { friends: arrayUnion(toUid) });
-
-          // Mark request as processed so we don't apply again
           await updateDoc(doc(db, "friendRequests", d.id), { processed: true, processedAt: serverTimestamp() });
-          console.log("Processed accepted request from", toUid);
+          debugLog("Processed accepted request from", toUid);
         } catch (err) {
-          console.error("Outgoing request processing failed for", d.id, err);
+          debugError("Outgoing request processing failed for", d.id, err);
         }
       }
     } catch (err) {
-      console.error("Outgoing requests snapshot error:", err);
+      debugError("Outgoing requests snapshot error:", err);
     }
   }, err => {
-    console.error("Outgoing requests onSnapshot error:", err);
+    debugError("Outgoing requests onSnapshot error:", err);
   });
 }
 
 /* ===== User doc listener for friends & topbar updates ===== */
 function startUserDocListener(user) {
   if (!user) return;
-  if (unsubscriptions.userDoc) {
-    console.log("User doc listener already active");
-    return;
-  }
+  if (unsubscriptions.userDoc) return;
 
-  console.log("Starting user doc listener");
+  debugLog("Starting user doc listener");
   const userRef = doc(db, "users", user.uid);
   unsubscriptions.userDoc = onSnapshot(userRef, async snap => {
     if (!snap.exists()) {
-      console.warn("User doc missing after login:", user.uid);
+      debugError("User doc missing after login:", user.uid);
       return;
     }
 
     const data = snap.data();
     profileCache[user.uid] = data;
+    debugLog("User doc updated:", data);
 
     // Update topbar
-    if (meAvatarSmall) meAvatarSmall.src = data.photoURL || defaultAvatar();
-    if (meName) meName.textContent = data.username || (auth.currentUser?.email ? auth.currentUser.email.split("@")[0] : "User");
+    if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = data.photoURL || defaultAvatar();
+    if (domElements.meName) domElements.meName.textContent = data.username || (auth.currentUser?.email ? auth.currentUser.email.split("@")[0] : "User");
     
     // Ensure UI is visible
     showSignedInState(user);
@@ -517,18 +638,18 @@ function startUserDocListener(user) {
     // Render friends list
     try {
       const friends = Array.isArray(data.friends) ? data.friends : [];
-      console.log("Rendering", friends.length, "friends");
+      debugLog("Rendering", friends.length, "friends");
       
-      if (friendsList) {
-        friendsList.innerHTML = "";
+      if (domElements.friendsList) {
+        domElements.friendsList.innerHTML = "";
         if (!friends.length) {
-          friendsList.innerHTML = "<div class='small'>No friends yet</div>";
+          domElements.friendsList.innerHTML = "<div class='small'>No friends yet</div>";
         } else {
           await Promise.all(friends.map(uid => fetchProfile(uid)));
           for (const uid of friends) {
             const p = profileCache[uid] || { username: uid, photoURL: "" };
-            if (friendItemTemplate) {
-              const clone = friendItemTemplate.content.cloneNode(true);
+            if (domElements.friendItemTemplate) {
+              const clone = domElements.friendItemTemplate.content.cloneNode(true);
               const img = clone.querySelector(".friend-avatar");
               const nameEl = clone.querySelector(".friend-name");
               if (img) img.src = p.photoURL || defaultAvatar();
@@ -543,101 +664,88 @@ function startUserDocListener(user) {
               const appended = tempContainer.firstElementChild;
               if (appended) {
                 appended.addEventListener("click", () => openProfile(uid));
-                friendsList.appendChild(appended);
+                domElements.friendsList.appendChild(appended);
               }
             } else {
               const li = document.createElement("li");
               li.className = "friend-item";
               li.innerHTML = `<img src="${p.photoURL || defaultAvatar()}" class="avatar-small" /><span>${escapeHtml(p.username || uid)}</span>`;
               li.addEventListener("click", () => openProfile(uid));
-              friendsList.appendChild(li);
+              domElements.friendsList.appendChild(li);
             }
           }
         }
       }
     } catch (err) {
-      console.error("Error rendering friends", err);
-      if (friendsList) {
-        friendsList.innerHTML = "<div class='small'>Failed to load friends</div>";
+      debugError("Error rendering friends", err);
+      if (domElements.friendsList) {
+        domElements.friendsList.innerHTML = "<div class='small'>Failed to load friends</div>";
       }
     }
   }, err => {
-    console.error("User doc snapshot error:", err);
-    if (friendsList) {
-      friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
+    debugError("User doc snapshot error:", err);
+    if (domElements.friendsList) {
+      domElements.friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
     }
   });
 }
 
-/* ===== Utility helper: check for existing pending requests (avoid duplicates) ===== */
+/* ===== Helper functions (keeping original API) ===== */
 async function hasExistingPendingRequestBetween(aUid, bUid) {
-  // check either direction for a pending request
   try {
     const q1 = query(collection(db, "friendRequests"), where("fromUid", "==", aUid), where("toUid", "==", bUid), where("status", "==", "pending"));
     const q2 = query(collection(db, "friendRequests"), where("fromUid", "==", bUid), where("toUid", "==", aUid), where("status", "==", "pending"));
     const [r1, r2] = await Promise.all([getDocs(q1), getDocs(q2)]);
     return !r1.empty || !r2.empty;
   } catch (err) {
-    console.error("hasExistingPendingRequestBetween error", err);
+    debugError("hasExistingPendingRequestBetween error", err);
     return false;
   }
 }
 
-/* ===== Setup visitor actions used on profile page (keeps original behavior but avoids duplicates) =====
-   NOTE: your profile.js also creates friend requests — keep it consistent with this behavior.
-*/
-async function setupVisitorActionsFromIndex(uid) {
-  // This function is provided if you want to reuse visitor logic in index.html context.
-  // For profile.js you already have a similar implementation; this is just to show consistent safe create.
-  if (!auth.currentUser) return;
-  const currentUid = auth.currentUser.uid;
+/* ===== Main Initialization ===== */
+document.addEventListener("DOMContentLoaded", () => {
+  debugLog("=== DOM CONTENT LOADED ===");
+  initializeApp();
+});
 
-  // non-blocking example of sending a request
-  if (currentUid === uid) return;
-
-  const alreadyFriendsSnap = await getDoc(doc(db, "users", currentUid));
-  const myFriends = alreadyFriendsSnap.exists() ? (alreadyFriendsSnap.data().friends || []) : [];
-  if (Array.isArray(myFriends) && myFriends.includes(uid)) {
-    alert("Already friends.");
-    return;
-  }
-
-  // guard duplicates
-  const existsPending = await hasExistingPendingRequestBetween(currentUid, uid);
-  if (existsPending) {
-    alert("A pending friend request already exists between you and this user.");
-    return;
-  }
-
-  // create request
-  try {
-    await addDoc(collection(db, "friendRequests"), {
-      fromUid: currentUid,
-      toUid: uid,
-      status: "pending",
-      createdAt: serverTimestamp()
-    });
-    alert("Friend request sent.");
-  } catch (err) {
-    console.error("Failed to send friend request", err);
-    alert("Failed to send friend request. See console.");
-  }
+// Fallback initialization if DOM is already loaded
+if (document.readyState === 'loading') {
+  // Do nothing, DOMContentLoaded will fire
+} else {
+  // DOM is already loaded
+  debugLog("=== DOM ALREADY LOADED ===");
+  setTimeout(initializeApp, 100);
 }
 
 /* ===== Safety fallback redirect ===== */
 setTimeout(() => {
   if (!authChecked) {
-    console.warn("Auth check timed out; redirecting to auth.html");
+    debugError("Auth check timed out; redirecting to auth.html");
     window.location.replace("auth.html");
   }
-}, 15000); // Increased timeout to 15 seconds
+}, 15000);
 
-// Also check if user exists but UI isn't showing after 3 seconds
+// Check if user exists but UI isn't showing after 5 seconds
 setTimeout(() => {
-  if (authReady && auth.currentUser && chatContainer && chatContainer.style.display === "none") {
-    console.warn("User signed in but UI not showing, forcing update");
-    showSignedInState(auth.currentUser);
+  if (authReady && auth?.currentUser && domElements.chatContainer && domElements.chatContainer.style.display === "none") {
+    debugError("User signed in but UI not showing, forcing update");
+    forceUIUpdate();
   }
-}, 3000);
+}, 5000);
 
-console.log("script.js loaded — topbar controls, chat, friends and friend-request listeners active.");
+// Add debug info to window for console debugging
+if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+  window.debugScript = {
+    forceUIUpdate,
+    showSignedInState: () => showSignedInState(auth?.currentUser),
+    showSignedOutState,
+    domElements: () => domElements,
+    auth: () => auth,
+    currentUser: () => auth?.currentUser,
+    profileCache: () => profileCache
+  };
+  debugLog("Debug functions added to window.debugScript");
+}
+
+debugLog("script.js loaded — enhanced debugging version active");
