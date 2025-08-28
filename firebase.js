@@ -5,15 +5,16 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/12.1.0/firebase
 
 // Your web app's Firebase configuration
 // WARNING: These are public configuration values, but should still be protected in production
-const firebaseConfig = {
-  apiKey: "AIzaSyCEMU7Sp8WXQ0fGQRfhtY_P15JDo6eI0Wk",
-  authDomain: "yester-chat.firebaseapp.com",
-  projectId: "yester-chat",
-  storageBucket: "yester-chat.firebasestorage.app",
-  messagingSenderId: "39250187153",
-  appId: "1:39250187153:web:b01fe53afbaa249195c030",
-  measurementId: "G-YX8QQGBELH"
-};
+  const firebaseConfig = {
+    apiKey: "AIzaSyCEMU7Sp8WXQ0fGQRfhtY_P15JDo6eI0Wk",
+    authDomain: "yester-chat.firebaseapp.com",
+    projectId: "yester-chat",
+    storageBucket: "yester-chat.firebasestorage.app",
+    messagingSenderId: "39250187153",
+    appId: "1:39250187153:web:b01fe53afbaa249195c030",
+    measurementId: "G-YX8QQGBELH"
+  };
+
 
 // Initialize Firebase
 let app;
