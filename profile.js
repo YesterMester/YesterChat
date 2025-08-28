@@ -1,4 +1,4 @@
-// profile.js — FULLY UPDATED WITH MUTUAL UNFRIEND AND LIVE UPDATES
+// profile.js — FULLY FIXED & UPDATED
 
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
@@ -240,17 +240,7 @@ export async function setupVisitorActions(uid, profileData) {
     const unfriendBtn = document.createElement("button");
     unfriendBtn.textContent = "Unfriend";
     unfriendBtn.onclick = async () => {
-      // REMOVE FROM CURRENT USER
-      await updateDoc(doc(db, "users", currentUser.uid), { friends: friendsArr.filter(x => x !== uid) });
-      // REMOVE FROM OTHER USER
-      const theirRef = doc(db, "users", uid);
-      const theirSnap = await getDoc(theirRef);
-      if (theirSnap.exists()) {
-        const theirFriends = Array.isArray(theirSnap.data().friends) ? theirSnap.data().friends : [];
-        if (theirFriends.includes(currentUser.uid)) {
-          await updateDoc(theirRef, { friends: theirFriends.filter(x => x !== currentUser.uid) });
-        }
-      }
+      await removeFriendMutually(uid);
       alert("Friend removed successfully.");
       await renderProfile(uid);
     };
@@ -308,55 +298,30 @@ export async function acceptFriendRequest(requestId, fromUid) {
   const myRef = doc(db, "users", currentUser.uid);
   const mySnap = await getDoc(myRef);
   const myFriends = mySnap.exists() ? mySnap.data().friends || [] : [];
-  if (!myFriends.includes(fromUid)) {
-    await updateDoc(myRef, { friends: Array.from(new Set([...myFriends, fromUid])), updatedAt: serverTimestamp() });
-  }
-  // ALSO ADD CURRENT USER TO THEIR FRIENDS
+  if (!myFriends.includes(fromUid)) await updateDoc(myRef, { friends: Array.from(new Set([...myFriends, fromUid])), updatedAt: serverTimestamp() });
+
   const theirRef = doc(db, "users", fromUid);
   const theirSnap = await getDoc(theirRef);
   const theirFriends = theirSnap.exists() ? theirSnap.data().friends || [] : [];
-  if (!theirFriends.includes(currentUser.uid)) {
-    await updateDoc(theirRef, { friends: Array.from(new Set([...theirFriends, currentUser.uid])), updatedAt: serverTimestamp() });
-  }
+  if (!theirFriends.includes(currentUser.uid)) await updateDoc(theirRef, { friends: Array.from(new Set([...theirFriends, currentUser.uid])), updatedAt: serverTimestamp() });
 }
 
 export async function declineFriendRequest(requestId) {
   await updateDoc(doc(db, "friendRequests", requestId), { status: "declined", respondedAt: serverTimestamp() });
 }
 
-/* ---------- Outgoing Accepted Requests Listener ---------- */
-export function startOutgoingRequestsListener() {
-  if (!currentUser) return () => {};
-  const q = query(collection(db, "friendRequests"), where("fromUid", "==", currentUser.uid), where("status", "==", "accepted"));
-  return onSnapshot(q, async (snapshot) => {
-    for (const docSnap of snapshot.docs) {
-      const toUid = docSnap.data().toUid;
-      if (!toUid) continue;
-      const myRef = doc(db, "users", currentUser.uid);
-      const mySnap = await getDoc(myRef);
-      const myFriends = mySnap.exists() ? mySnap.data().friends || [] : [];
-      if (!myFriends.includes(toUid)) {
-        await updateDoc(myRef, { friends: Array.from(new Set([...myFriends, toUid])), updatedAt: serverTimestamp() });
-      }
-    }
-  });
-}
+/* ---------- Mutual Unfriend Helper ---------- */
+export async function removeFriendMutually(uidToRemove) {
+  if (!currentUser || !uidToRemove) return;
+  const currentRef = doc(db, "users", currentUser.uid);
+  const currentSnap = await getDoc(currentRef);
+  const currentFriends = currentSnap.exists() ? currentSnap.data().friends || [] : [];
+  if (currentFriends.includes(uidToRemove)) await updateDoc(currentRef, { friends: currentFriends.filter(x => x !== uidToRemove), updatedAt: serverTimestamp() });
 
-/* ---------- Fetch Friends ---------- */
-export async function fetchFriends(callback) {
-  if (!currentUser) return callback([]);
-  const userSnap = await getDoc(doc(db, "users", currentUser.uid));
-  if (!userSnap.exists()) return callback([]);
-  const friends = Array.isArray(userSnap.data().friends) ? userSnap.data().friends : [];
-  if (!friends.length) return callback([]);
-  const friendProfiles = [];
-  for (const uid of friends) {
-    try {
-      const fSnap = await getDoc(doc(db, "users", uid));
-      if (fSnap.exists()) friendProfiles.push({ uid, ...fSnap.data() });
-    } catch {}
-  }
-  callback(friendProfiles);
+  const otherRef = doc(db, "users", uidToRemove);
+  const otherSnap = await getDoc(otherRef);
+  const otherFriends = otherSnap.exists() ? otherSnap.data().friends || [] : [];
+  if (otherFriends.includes(currentUser.uid)) await updateDoc(otherRef, { friends: otherFriends.filter(x => x !== currentUser.uid), updatedAt: serverTimestamp() });
 }
 
 /* ---------- Live Friends Update ---------- */
@@ -368,26 +333,8 @@ function startLiveFriendsListener() {
   friendsUnsub = onSnapshot(userRef, async (snap) => {
     if (!snap.exists()) return;
     const friendsArr = Array.isArray(snap.data().friends) ? snap.data().friends : [];
-    updateFriendListUI(friendsArr); // Implement this function to render your friend list in UI
+    updateFriendListUI(friendsArr); // implement your DOM update here
   });
-}
-
-/* ---------- Mutual Unfriend Helper ---------- */
-export async function removeFriendMutually(uidToRemove) {
-  if (!currentUser || !uidToRemove) return;
-  const currentRef = doc(db, "users", currentUser.uid);
-  const currentSnap = await getDoc(currentRef);
-  const currentFriends = currentSnap.exists() ? currentSnap.data().friends || [] : [];
-  if (currentFriends.includes(uidToRemove)) {
-    await updateDoc(currentRef, { friends: currentFriends.filter(x => x !== uidToRemove), updatedAt: serverTimestamp() });
-  }
-
-  const otherRef = doc(db, "users", uidToRemove);
-  const otherSnap = await getDoc(otherRef);
-  const otherFriends = otherSnap.exists() ? otherSnap.data().friends || [] : [];
-  if (otherFriends.includes(currentUser.uid)) {
-    await updateDoc(otherRef, { friends: otherFriends.filter(x => x !== currentUser.uid), updatedAt: serverTimestamp() });
-  }
 }
 
 /* ---------- Utility ---------- */
@@ -398,9 +345,8 @@ export function getCurrentUser() {
 /* ---------- Initialize ---------- */
 initAuthListener();
 
-/* ---------- Example UI update placeholder ----------
+/* ---------- UI Update Placeholder ----------
 function updateFriendListUI(friendsArr) {
-  // Replace this with your actual DOM rendering of friend list
   console.log("Live friend list updated:", friendsArr);
 }
----------------------------------------------------- */
+----------------------------------------------------
