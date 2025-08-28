@@ -1,7 +1,9 @@
 // auth.js
-import { auth, db } from "./firebase.js";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-import { doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { auth } from "./firebase.js";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword
+} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 
 // --- Elements ---
 const signupUsername = document.getElementById("signup-username");
@@ -17,12 +19,12 @@ const signinMsg = document.getElementById("signin-msg");
 
 // --- Sign Up ---
 signupBtn?.addEventListener("click", async () => {
-  const username = signupUsername.value.trim();
   const email = signupEmail.value.trim();
   const pass = signupPass.value.trim();
+  // The username is captured here but will be stored by the next page's script.
 
-  if (!username || !email || pass.length < 6) {
-    signupMsg.textContent = "Please fill all fields. Password must be at least 6 characters.";
+  if (!email || pass.length < 6) {
+    signupMsg.textContent = "Please enter a valid email and password (at least 6 characters).";
     signupMsg.style.color = "red";
     return;
   }
@@ -32,29 +34,17 @@ signupBtn?.addEventListener("click", async () => {
   signupMsg.style.color = "black";
 
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
-    const user = userCredential.user;
-
-    await setDoc(doc(db, "users", user.uid), {
-      username: username,
-      usernameLower: username.toLowerCase(),
-      bio: "Just joined Yester Chat!",
-      photoURL: "",
-      friends: [],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
-    signupMsg.textContent = "✅ Account created successfully! Redirecting...";
-    signupMsg.style.color = "green";
+    // This function now ONLY creates the authentication user.
+    // The user document in the database is handled by script.js or profile.js
+    // to prevent race conditions and errors.
+    await createUserWithEmailAndPassword(auth, email, pass);
     
-    setTimeout(() => window.location.href = "index.html", 1000);
+    // On success, redirect to the main app.
+    window.location.href = "index.html";
 
   } catch (err) {
-    // This part of the code correctly displays the sign-up error from Firebase
     signupMsg.textContent = `❌ ${err.message}`;
     signupMsg.style.color = "red";
-    console.error("Sign up error:", err);
   } finally {
     signupBtn.disabled = false;
   }
@@ -78,16 +68,12 @@ signinBtn?.addEventListener("click", async () => {
   try {
     await signInWithEmailAndPassword(auth, email, pass);
 
-    signinMsg.textContent = "✅ Logged in successfully! Redirecting...";
-    signinMsg.style.color = "green";
-    
-    setTimeout(() => window.location.href = "index.html", 500);
+    // On success, redirect to the main app.
+    window.location.href = "index.html";
 
   } catch (err) {
-    // This part of the code correctly displays the login error from Firebase
     signinMsg.textContent = `❌ ${err.message}`;
     signinMsg.style.color = "red";
-    console.error("Sign in error:", err);
   } finally {
     signinBtn.disabled = false;
   }
