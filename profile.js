@@ -1,4 +1,20 @@
-/* ---------- Part 1: Imports, DOM, Helpers & Auth ---------- */
+/*
+ * =========================================================================================
+ * YESTER CHAT: PROFILE.JS (REWRITTEN)
+ * =========================================================================================
+ * This script manages user profiles, editing, friend requests, and friend lists.
+ *
+ * Key Fixes & Improvements:
+ * 1.  **Profile Editing:** The edit form now reliably shows for the logged-in user.
+ * 2.  **Friend Requests:** Sending requests is now a robust async operation with UI feedback.
+ * 3.  **Mutual Unfriending:** Removing a friend now correctly updates the relationship for both users.
+ * 4.  **Live Friends List:** The friends list is now rendered directly by this script and updates in real-time.
+ * 5.  **Code Structure:** Logic is better organized, with clear functions for each action and robust error handling.
+ * 6.  **User Experience:** Buttons are disabled and text is updated during actions (e.g., "Saving...", "Sending...") to give the user clear feedback.
+ * =========================================================================================
+ */
+
+/* ---------- Part 1: Imports & DOM Elements ---------- */
 
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
@@ -12,18 +28,24 @@ import {
   where,
   serverTimestamp,
   setDoc,
-  getDocs as _getDocs,
-  onSnapshot
-} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
-import { onAuthStateChanged, updateProfile as updateAuthProfile } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+  getDocs,
+  onSnapshot,
+  arrayUnion,
+  arrayRemove,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"; // Note: Using a specific stable version
+import {
+  onAuthStateChanged,
+  updateProfile as updateAuthProfile,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-/* ---------- DOM Elements ---------- */
+// --- DOM Elements ---
 const profileAvatar = document.getElementById("profileAvatar");
 const profileUsername = document.getElementById("profileUsername");
 const profileEmail = document.getElementById("profileEmail");
 const profileBio = document.getElementById("profileBio");
 const profileActions = document.getElementById("profile-actions");
 
+// Profile Editing
 const editArea = document.getElementById("editArea");
 const editAvatarPreview = document.getElementById("editAvatarPreview");
 const editUsername = document.getElementById("editUsername");
@@ -33,368 +55,369 @@ const saveProfileBtn = document.getElementById("saveProfileBtn");
 const cancelEditBtn = document.getElementById("cancelEditBtn");
 const editMsg = document.getElementById("editMsg");
 
-const topbarName = document.getElementById("meName");
-const topbarAvatar = document.getElementById("meAvatarSmall");
+// Friends List
+const friendsListContainer = document.getElementById("friendsListContainer");
+const friendsList = document.getElementById("friendsList");
 
-/* ---------- Helpers ---------- */
-function defaultAvatar() {
-  return "https://www.gravatar.com/avatar/?d=mp&s=160";
+/* ---------- Part 2: State & Helpers ---------- */
+
+let currentUser = null; // The authenticated user object
+let viewedProfileData = null; // The profile data of the user being viewed
+let friendsListenerUnsubscribe = null; // To stop the friends listener
+
+// --- Helper Functions ---
+const defaultAvatar = () => "https://www.gravatar.com/avatar/?d=mp&s=160";
+const getUidFromUrl = () => new URLSearchParams(window.location.search).get("uid");
+
+/**
+ * Toggles the disabled state and text of a button.
+ * @param {HTMLButtonElement} btn The button element.
+ * @param {boolean} isLoading Whether the button should be in a loading state.
+ * @param {string} text The text to display when not loading.
+ */
+function setButtonLoading(btn, isLoading, text = "Save") {
+  if (btn) {
+    btn.disabled = isLoading;
+    btn.textContent = isLoading ? `${text.replace(/e$/, "")}ing...` : text;
+  }
 }
 
-function qsParam(name) {
-  return new URLSearchParams(window.location.search).get(name);
-}
+/* ---------- Part 3: Core Logic & Profile Rendering ---------- */
 
-function navigateToProfile(uid) {
-  window.location.href = `profile.html?uid=${uid}`;
-}
-
-/* ---------- State ---------- */
-let currentUser = null;
-let viewedUid = null;
-let viewedProfileData = null;
-
-/* ---------- Auth Listener ---------- */
+/**
+ * Initializes the authentication listener. This is the entry point of the script.
+ */
 export function initAuthListener() {
   onAuthStateChanged(auth, async (user) => {
-    if (!user) {
+    if (user) {
+      currentUser = user;
+      const viewedUid = getUidFromUrl() || currentUser.uid;
+      await ensureUserDocExists(user);
+      await loadProfilePage(viewedUid);
+    } else {
       window.location.replace("auth.html");
-      return;
-    }
-    currentUser = user;
-    viewedUid = qsParam("uid") || currentUser.uid;
-    try {
-      await ensureUserDocExists(currentUser);
-      await renderProfile(viewedUid);
-      startLiveFriendsListener(); // Live updates for friends
-    } catch (err) {
-      console.error("Auth init error in profile.js:", err);
     }
   });
 }
 
-/* ---------- Ensure user document exists ---------- */
-export async function ensureUserDocExists(user) {
-  if (!user) return;
-  const ref = doc(db, "users", user.uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    const usernameDefault = user.email ? user.email.split("@")[0] : "User";
-    await setDoc(ref, {
+/**
+ * Creates a user document in Firestore if it doesn't already exist.
+ * @param {object} user The Firebase auth user object.
+ */
+async function ensureUserDocExists(user) {
+  const userRef = doc(db, "users", user.uid);
+  const docSnap = await getDoc(userRef);
+  if (!docSnap.exists()) {
+    const usernameDefault = user.email ? user.email.split("@")[0] : "new_user";
+    await setDoc(userRef, {
       username: usernameDefault,
       usernameLower: usernameDefault.toLowerCase(),
-      bio: "",
-      photoURL: "",
+      bio: "Just joined Yester Chat!",
+      photoURL: user.photoURL || "",
       friends: [],
       createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
     });
   }
 }
 
-/* ---------- Export init ---------- */
-initAuthListener();
+/**
+ * Fetches data and renders the entire profile page for a given UID.
+ * @param {string} uid The UID of the profile to load.
+ */
+async function loadProfilePage(uid) {
+  const userRef = doc(db, "users", uid);
+  const docSnap = await getDoc(userRef);
 
-/* ---------- Part 2: Profile Rendering & Actions ---------- */
-
-/* ---------- Render Profile ---------- */
-export async function renderProfile(uid) {
-  if (!uid) return;
-
-  const ref = doc(db, "users", uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    profileUsername.textContent = "Profile not found";
-    profileBio.textContent = "";
+  if (!docSnap.exists()) {
+    profileUsername.textContent = "User Not Found";
+    [profileBio, profileEmail].forEach((el) => (el.textContent = ""));
     profileAvatar.src = defaultAvatar();
-    profileEmail.textContent = "";
     profileActions.innerHTML = "";
     editArea.style.display = "none";
+    friendsListContainer.style.display = "none";
     return;
   }
 
-  const data = snap.data();
-  viewedProfileData = data;
+  viewedProfileData = { uid, ...docSnap.data() };
 
-  profileAvatar.src = data.photoURL || defaultAvatar();
-  profileUsername.textContent = data.username || "Unknown";
-  profileEmail.textContent = uid === currentUser.uid ? auth.currentUser?.email || "" : "";
-  profileBio.textContent = data.bio || "";
+  // Render basic profile info
+  profileAvatar.src = viewedProfileData.photoURL || defaultAvatar();
+  profileUsername.textContent = viewedProfileData.username;
+  profileBio.textContent = viewedProfileData.bio;
 
+  // Determine if viewing own profile or another user's
   if (uid === currentUser.uid) {
-    topbarName.textContent = data.username || "You";
-    topbarAvatar.src = data.photoURL || defaultAvatar();
-    editArea.style.display = "block";
-    editUsername.value = data.username || "";
-    editBio.value = data.bio || "";
-    editAvatarPreview.src = data.photoURL || defaultAvatar();
-    setupOwnerActions();
+    renderOwnerView();
   } else {
-    editArea.style.display = "none";
-    await setupVisitorActions(uid, data);
+    renderVisitorView();
   }
 }
 
-/* ---------- Owner Edit Handlers ---------- */
+/**
+ * Renders the view for the profile owner (shows edit form, friends list).
+ */
+function renderOwnerView() {
+  profileEmail.textContent = currentUser.email;
+  friendsListContainer.style.display = "block";
+  editArea.style.display = "block";
+  profileActions.innerHTML = `<div class="small">This is your public profile. Use the form to make changes.</div>`;
+
+  // Populate edit form with current data
+  editUsername.value = viewedProfileData.username;
+  editBio.value = viewedProfileData.bio;
+  editAvatarPreview.src = viewedProfileData.photoURL || defaultAvatar();
+
+  // Start listening for real-time friend updates
+  startFriendsListener();
+}
+
+/**
+ * Renders the view for a visitor (shows friend actions, hides sensitive info).
+ */
+async function renderVisitorView() {
+  profileEmail.textContent = ""; // Hide email from visitors
+  editArea.style.display = "none";
+  friendsListContainer.style.display = "none"; // Hide other users' friend lists
+
+  // Setup action buttons (Add/Unfriend, etc.)
+  profileActions.innerHTML = ""; // Clear previous buttons
+  const loadingIndicator = document.createElement("p");
+  loadingIndicator.textContent = "Loading actions...";
+  profileActions.appendChild(loadingIndicator);
+
+  // Check friendship status
+  const myProfileSnap = await getDoc(doc(db, "users", currentUser.uid));
+  const myFriends = myProfileSnap.data()?.friends || [];
+  const isFriend = myFriends.includes(viewedProfileData.uid);
+
+  loadingIndicator.remove(); // Remove loading text
+
+  if (isFriend) {
+    const unfriendBtn = document.createElement("button");
+    unfriendBtn.textContent = "Unfriend";
+    unfriendBtn.onclick = () => removeFriend(viewedProfileData.uid, unfriendBtn);
+    profileActions.appendChild(unfriendBtn);
+  } else {
+    // Check for pending friend requests
+    const q = query(
+      collection(db, "friendRequests"),
+      where("fromUid", "in", [currentUser.uid, viewedProfileData.uid]),
+      where("toUid", "in", [currentUser.uid, viewedProfileData.uid]),
+      where("status", "==", "pending")
+    );
+    const requestSnap = await getDocs(q);
+
+    if (!requestSnap.empty) {
+      const request = requestSnap.docs[0].data();
+      const statusText = document.createElement("p");
+      statusText.className = "small";
+      statusText.textContent =
+        request.fromUid === currentUser.uid
+          ? "Friend request sent."
+          : "This user sent you a friend request.";
+      profileActions.appendChild(statusText);
+    } else {
+      const addFriendBtn = document.createElement("button");
+      addFriendBtn.textContent = "Add Friend";
+      addFriendBtn.onclick = () => sendFriendRequest(viewedProfileData.uid, addFriendBtn);
+      profileActions.appendChild(addFriendBtn);
+    }
+  }
+}
+
+/* ---------- Part 4: Profile Editing & Saving ---------- */
+
+async function handleProfileSave() {
+  const newUsername = editUsername.value.trim();
+  const newBio = editBio.value.trim();
+  const file = photoInput.files[0];
+
+  // --- Validation ---
+  if (newUsername.length < 2 || newUsername.length > 30) {
+    editMsg.textContent = "Username must be between 2 and 30 characters.";
+    return;
+  }
+  
+  setButtonLoading(saveProfileBtn, true, "Save");
+  editMsg.textContent = "Checking username availability...";
+  
+  // --- Check if username is taken ---
+  const unameQuery = query(collection(db, "users"), where("usernameLower", "==", newUsername.toLowerCase()));
+  const unameSnap = await getDocs(unameQuery);
+  const isTaken = !unameSnap.empty && unameSnap.docs[0].id !== currentUser.uid;
+  
+  if (isTaken) {
+    editMsg.textContent = "Username is already taken.";
+    setButtonLoading(saveProfileBtn, false, "Save Profile");
+    return;
+  }
+  
+  // --- Handle Photo Upload ---
+  let photoURL = viewedProfileData.photoURL; // Keep old photo by default
+  if (file) {
+    editMsg.textContent = "Uploading photo...";
+    try {
+      if (file.size > 5 * 1024 * 1024) throw new Error("File size exceeds 5MB.");
+      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Invalid file type.");
+      photoURL = await uploadProfileImage(file, currentUser.uid);
+    } catch (error) {
+      editMsg.textContent = `Photo upload failed: ${error.message}`;
+      setButtonLoading(saveProfileBtn, false, "Save Profile");
+      return;
+    }
+  }
+
+  // --- Update Firestore & Auth Profile ---
+  try {
+    editMsg.textContent = "Saving profile...";
+    const userRef = doc(db, "users", currentUser.uid);
+    await updateDoc(userRef, {
+      username: newUsername,
+      usernameLower: newUsername.toLowerCase(),
+      bio: newBio,
+      photoURL: photoURL,
+      updatedAt: serverTimestamp(),
+    });
+    
+    await updateAuthProfile(currentUser, {
+      displayName: newUsername,
+      photoURL: photoURL,
+    });
+    
+    editMsg.textContent = "Profile saved successfully!";
+    photoInput.value = ""; // Clear file input
+    await loadProfilePage(currentUser.uid); // Reload profile to show changes
+  } catch (error) {
+    console.error("Profile save error:", error);
+    editMsg.textContent = "Failed to save profile. Please try again.";
+  } finally {
+    setButtonLoading(saveProfileBtn, false, "Save Profile");
+  }
+}
+
+// --- Event Listeners for Edit Form ---
+saveProfileBtn?.addEventListener("click", handleProfileSave);
+
 photoInput?.addEventListener("change", () => {
-  const f = photoInput.files[0];
-  if (!f) return;
-  editAvatarPreview.src = URL.createObjectURL(f);
+  const file = photoInput.files[0];
+  if (file) {
+    editAvatarPreview.src = URL.createObjectURL(file);
+  }
 });
 
 cancelEditBtn?.addEventListener("click", () => {
-  if (!viewedProfileData) return;
-  editUsername.value = viewedProfileData.username || "";
-  editBio.value = viewedProfileData.bio || "";
+  // Reset form to its original state
+  editUsername.value = viewedProfileData.username;
+  editBio.value = viewedProfileData.bio;
   editAvatarPreview.src = viewedProfileData.photoURL || defaultAvatar();
   photoInput.value = "";
   editMsg.textContent = "";
 });
 
-saveProfileBtn?.addEventListener("click", async () => {
-  if (!currentUser) return alert("Not signed in.");
-  const newUsername = (editUsername?.value || "").trim();
-  const newBio = (editBio?.value || "").trim();
 
-  if (!newUsername || newUsername.length < 2) {
-    editMsg.textContent = "Username must be at least 2 characters.";
-    return;
-  }
-  if (newUsername.length > 30) {
-    editMsg.textContent = "Username must be 30 characters or less.";
-    return;
-  }
+/* ---------- Part 5: Friend Actions ---------- */
 
-  editMsg.textContent = "Checking username availability...";
-  const unameSnap = await _getDocs(
-    query(collection(db, "users"), where("usernameLower", "==", newUsername.toLowerCase()))
-  );
-  const conflict = unameSnap.docs.some(d => d.id !== currentUser.uid);
-  if (conflict) {
-    editMsg.textContent = "Username already taken — choose another.";
-    return;
-  }
-
-  let uploadedUrl = null;
-  if (photoInput.files && photoInput.files.length > 0) {
-    try {
-      const file = photoInput.files[0];
-      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-        editMsg.textContent = "Only PNG/JPEG/WebP images allowed.";
-        return;
-      }
-      if (file.size > 6 * 1024 * 1024) {
-        editMsg.textContent = "Image too large (max 6MB).";
-        return;
-      }
-      editMsg.textContent = "Uploading photo...";
-      uploadedUrl = await uploadProfileImage(file, currentUser.uid);
-    } catch {
-      editMsg.textContent = "Image upload failed.";
-      return;
-    }
-  }
-
+/**
+ * Sends a friend request to the target user.
+ * @param {string} targetUid The UID of the user to send a request to.
+ * @param {HTMLButtonElement} btn The button that triggered the action.
+ */
+async function sendFriendRequest(targetUid, btn) {
+  setButtonLoading(btn, true, "Add Friend");
   try {
-    const userRef = doc(db, "users", currentUser.uid);
-    const payload = {
-      username: newUsername,
-      usernameLower: newUsername.toLowerCase(),
-      bio: newBio,
-      updatedAt: serverTimestamp()
-    };
-    if (uploadedUrl) payload.photoURL = uploadedUrl;
-
-    await updateDoc(userRef, payload);
-    await updateAuthProfile(currentUser, {
-      displayName: newUsername,
-      photoURL: uploadedUrl || currentUser.photoURL || null
+    await addDoc(collection(db, "friendRequests"), {
+      fromUid: currentUser.uid,
+      toUid: targetUid,
+      status: "pending",
+      createdAt: serverTimestamp(),
     });
-
-    editMsg.textContent = "Saved.";
-    topbarName.textContent = newUsername;
-    topbarAvatar.src = uploadedUrl || currentUser.photoURL || defaultAvatar();
-    await renderProfile(currentUser.uid);
-    photoInput.value = "";
-  } catch {
-    editMsg.textContent = "Failed to save profile.";
+    // Reload the actions to show "Request Sent"
+    await renderVisitorView();
+  } catch (error) {
+    console.error("Friend request error:", error);
+    alert("Failed to send friend request.");
+    setButtonLoading(btn, false, "Add Friend");
   }
-});
-
-/* ---------- Visitor Actions ---------- */
-async function hasPendingRequestBetween(aUid, bUid) {
-  const colRef = collection(db, "friendRequests");
-  const snap1 = await _getDocs(query(colRef, where("fromUid", "==", aUid), where("toUid", "==", bUid), where("status", "==", "pending")));
-  if (!snap1.empty) return { exists: true, doc: snap1.docs[0], direction: "outgoing" };
-  const snap2 = await _getDocs(query(colRef, where("fromUid", "==", bUid), where("toUid", "==", aUid), where("status", "==", "pending")));
-  if (!snap2.empty) return { exists: true, doc: snap2.docs[0], direction: "incoming" };
-  return { exists: false };
 }
 
-export async function setupVisitorActions(uid, profileData) {
-  profileActions.innerHTML = "";
-  if (!currentUser || uid === currentUser.uid) return;
-
-  const mySnap = await getDoc(doc(db, "users", currentUser.uid));
-  const myData = mySnap.exists() ? mySnap.data() : {};
-  const friendsArr = Array.isArray(myData.friends) ? myData.friends : [];
-  const isFriend = friendsArr.includes(uid);
-
-  if (isFriend) {
-    const unfriendBtn = document.createElement("button");
-    unfriendBtn.textContent = "Unfriend";
-    unfriendBtn.onclick = async () => {
-      await removeFriendMutually(uid);
-      alert("Friend removed successfully.");
-      await renderProfile(uid);
-    };
-    profileActions.appendChild(unfriendBtn);
+/**
+ * Removes a friend mutually.
+ * @param {string} friendUid The UID of the friend to remove.
+ * @param {HTMLButtonElement} btn The button that triggered the action.
+ */
+async function removeFriend(friendUid, btn) {
+  if (!confirm(`Are you sure you want to unfriend ${viewedProfileData.username}?`)) {
     return;
   }
-
-  const addBtn = document.createElement("button");
-  addBtn.textContent = "Add Friend";
-  addBtn.onclick = async () => {
-    const pending = await hasPendingRequestBetween(currentUser.uid, uid);
-    if (pending.exists) {
-      if (pending.direction === "outgoing") alert("You already sent a friend request.");
-      else if (pending.direction === "incoming") alert("This user sent you a request.");
-      return;
-    }
-    await addDoc(collection(db, "friendRequests"), { fromUid: currentUser.uid, toUid: uid, status: "pending", createdAt: serverTimestamp() });
-    alert("Friend request sent.");
-    await renderProfile(uid);
-  };
-  profileActions.appendChild(addBtn);
-}
-
-/* ---------- Owner Actions ---------- */
-export function setupOwnerActions() {
-  profileActions.innerHTML = "";
-  const info = document.createElement("div");
-  info.className = "small";
-  info.textContent = "This is your profile. Use the form below to update username, bio, and photo.";
-  profileActions.appendChild(info);
-}
-/* ---------- Part 3: Friend Requests & Live Updates ---------- */
-
-/* ---------- Friend Requests ---------- */
-export function listenForFriendRequests(callback) {
-  if (!currentUser) return () => {};
-  const q = query(
-    collection(db, "friendRequests"),
-    where("toUid", "==", currentUser.uid),
-    where("status", "==", "pending")
-  );
-
-  const unsubscribe = onSnapshot(q, async (snapshot) => {
-    const requests = [];
-    for (const docSnap of snapshot.docs) {
-      const req = docSnap.data();
-      let fromUser = null;
-      try {
-        const fromSnap = await getDoc(doc(db, "users", req.fromUid));
-        if (fromSnap.exists()) fromUser = { uid: fromSnap.id, ...fromSnap.data() };
-      } catch {}
-      requests.push({ id: docSnap.id, ...req, fromUser });
-    }
-    callback(requests);
-  });
-  return unsubscribe;
-}
-
-export async function acceptFriendRequest(requestId, fromUid) {
-  // Update request status
-  await updateDoc(doc(db, "friendRequests", requestId), { status: "accepted", respondedAt: serverTimestamp() });
-
-  // Add to current user friends
-  const myRef = doc(db, "users", currentUser.uid);
-  const mySnap = await getDoc(myRef);
-  const myFriends = mySnap.exists() ? mySnap.data().friends || [] : [];
-  if (!myFriends.includes(fromUid)) {
-    await updateDoc(myRef, { friends: Array.from(new Set([...myFriends, fromUid])), updatedAt: serverTimestamp() });
-  }
-
-  // Add current user to sender's friends
-  const theirRef = doc(db, "users", fromUid);
-  const theirSnap = await getDoc(theirRef);
-  const theirFriends = theirSnap.exists() ? theirSnap.data().friends || [] : [];
-  if (!theirFriends.includes(currentUser.uid)) {
-    await updateDoc(theirRef, { friends: Array.from(new Set([...theirFriends, currentUser.uid])), updatedAt: serverTimestamp() });
+  setButtonLoading(btn, true, "Unfriend");
+  try {
+    const currentUserRef = doc(db, "users", currentUser.uid);
+    const friendUserRef = doc(db, "users", friendUid);
+    
+    // Use arrayRemove for atomic operations
+    await updateDoc(currentUserRef, { friends: arrayRemove(friendUid) });
+    await updateDoc(friendUserRef, { friends: arrayRemove(currentUser.uid) });
+    
+    // Reload the actions to show the "Add Friend" button again
+    await renderVisitorView();
+  } catch (error) {
+    console.error("Unfriend error:", error);
+    alert("Failed to remove friend. Please try again.");
+    setButtonLoading(btn, false, "Unfriend");
   }
 }
 
-export async function declineFriendRequest(requestId) {
-  await updateDoc(doc(db, "friendRequests", requestId), { status: "declined", respondedAt: serverTimestamp() });
-}
 
-/* ---------- Mutual Unfriend Helper ---------- */
-export async function removeFriendMutually(uidToRemove) {
-  if (!currentUser || !uidToRemove) return;
+/* ---------- Part 6: Live Friends List ---------- */
 
-  // Remove from current user
-  const currentRef = doc(db, "users", currentUser.uid);
-  const currentSnap = await getDoc(currentRef);
-  const currentFriends = currentSnap.exists() ? currentSnap.data().friends || [] : [];
-  if (currentFriends.includes(uidToRemove)) {
-    await updateDoc(currentRef, {
-      friends: currentFriends.filter(x => x !== uidToRemove),
-      updatedAt: serverTimestamp()
-    });
-  }
-
-  // Remove from other user
-  const otherRef = doc(db, "users", uidToRemove);
-  const otherSnap = await getDoc(otherRef);
-  const otherFriends = otherSnap.exists() ? otherSnap.data().friends || [] : [];
-  if (otherFriends.includes(currentUser.uid)) {
-    await updateDoc(otherRef, {
-      friends: otherFriends.filter(x => x !== currentUser.uid),
-      updatedAt: serverTimestamp()
-    });
-  }
-}
-
-/* ---------- Live Friends Update ---------- */
-let friendsUnsub = null;
-export function startLiveFriendsListener() {
-  if (!currentUser) return;
-  if (friendsUnsub) friendsUnsub();
+/**
+ * Sets up a real-time listener for the current user's friends list.
+ */
+function startFriendsListener() {
+  // Unsubscribe from any previous listener
+  if (friendsListenerUnsubscribe) friendsListenerUnsubscribe();
 
   const userRef = doc(db, "users", currentUser.uid);
-  friendsUnsub = onSnapshot(userRef, async (snap) => {
-    if (!snap.exists()) return;
-    const friendsArr = Array.isArray(snap.data().friends) ? snap.data().friends : [];
-    updateFriendListUI(friendsArr); // implement your DOM rendering of friend list
+  friendsListenerUnsubscribe = onSnapshot(userRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const friendUids = docSnap.data().friends || [];
+      renderFriendsList(friendUids);
+    }
   });
 }
 
-/* ---------- Fetch Friends ---------- */
-export async function fetchFriends(callback) {
-  if (!currentUser) return callback([]);
-  const userSnap = await getDoc(doc(db, "users", currentUser.uid));
-  if (!userSnap.exists()) return callback([]);
-  const friends = Array.isArray(userSnap.data().friends) ? userSnap.data().friends : [];
-  if (!friends.length) return callback([]);
+/**
+ * Fetches profile data for friend UIDs and renders them to the DOM.
+ * @param {string[]} friendUids Array of friend UIDs.
+ */
+async function renderFriendsList(friendUids) {
+  friendsList.innerHTML = ""; // Clear the list first
 
-  const friendProfiles = [];
-  for (const uid of friends) {
-    try {
-      const fSnap = await getDoc(doc(db, "users", uid));
-      if (fSnap.exists()) friendProfiles.push({ uid, ...fSnap.data() });
-    } catch {}
+  if (friendUids.length === 0) {
+    friendsList.innerHTML = `<li class="small">You have no friends yet.</li>`;
+    return;
   }
-  callback(friendProfiles);
+
+  // Create a list of promises to fetch all friend profiles
+  const friendPromises = friendUids.map(uid => getDoc(doc(db, "users", uid)));
+  
+  const friendDocs = await Promise.all(friendPromises);
+  
+  friendDocs.forEach(docSnap => {
+    if (docSnap.exists()) {
+      const friend = { uid: docSnap.id, ...docSnap.data() };
+      const li = document.createElement("li");
+      li.className = "friend-item";
+      li.innerHTML = `
+        <img src="${friend.photoURL || defaultAvatar()}" alt="${friend.username}" />
+        <span>${friend.username || "Unknown"}</span>
+      `;
+      // Navigate to friend's profile on click
+      li.onclick = () => (window.location.href = `profile.html?uid=${friend.uid}`);
+      friendsList.appendChild(li);
+    }
+  });
 }
 
-/* ---------- Utility ---------- */
-export function getCurrentUser() {
-  return currentUser;
-}
-
-/* ---------- Example UI update placeholder ----------
-function updateFriendListUI(friendsArr) {
-  // Replace with your actual DOM update logic
-  console.log("Live friend list updated:", friendsArr);
-}
----------------------------------------------------- */
+// Automatically initialize the script when loaded
+initAuthListener();
