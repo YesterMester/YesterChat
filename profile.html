@@ -14,15 +14,16 @@
     .small { color:#666; font-size:0.9rem; }
     .bio { margin:10px 0 16px 0; text-align:center; color:#333; }
     .profile-actions { display:flex; gap:8px; justify-content:center; margin-top:12px; flex-wrap:wrap; }
-    button { padding:8px 12px; border-radius:8px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    button { padding:8px 12px; border-radius:8px; border:1px solid #ddd; background:#fff; cursor:pointer; font-family: inherit; }
+    button:disabled { cursor: not-allowed; background-color: #f0f0f0; }
     button.primary { background:#2f6cff; color:#fff; border-color:transparent; }
     .edit-area { margin-top:16px; display:grid; gap:8px; }
-    .edit-area input[type="text"], .edit-area textarea { width:100%; padding:10px; border-radius:8px; border:1px solid #e6e6e6; }
-    .row { display:flex; gap:12px; align-items:center; }
+    .edit-area input[type="text"], .edit-area textarea { width:100%; box-sizing: border-box; padding:10px; border-radius:8px; border:1px solid #e6e6e6; font-family: inherit; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
     .left { flex:0 0 180px; text-align:center; }
-    .right { flex:1; }
+    .right { flex:1; min-width: 250px; }
     .file-input { font-size:0.9rem; }
-    #editMsg { color:#555; font-size:0.95rem; margin-top:6px; text-align:center; }
+    #editMsg { color:#555; font-size:0.95rem; margin-top:6px; text-align:center; min-height: 1.2em; }
     .muted { color:#888; font-size:0.9rem; }
     a.link { color:#2f6cff; text-decoration:none; }
     #friendsListContainer { margin-top:20px; background:#fafafa; padding:12px; border-radius:8px; border:1px solid #eee; }
@@ -40,9 +41,9 @@
       <div style="display:flex; justify-content:center;">
         <img id="profileAvatar" src="https://www.gravatar.com/avatar/?d=mp&s=160" class="profile-avatar" alt="Profile Photo" />
       </div>
-      <h2 id="profileUsername">Username</h2>
-      <div class="small" id="profileEmail">email@example.com</div>
-      <p id="profileBio" class="bio">This is your bio. It can be a few lines long.</p>
+      <h2 id="profileUsername">Loading...</h2>
+      <div class="small" id="profileEmail"></div>
+      <p id="profileBio" class="bio"></p>
       <div id="profile-actions" class="profile-actions" aria-live="polite"></div>
 
       <div id="editArea" class="edit-area" style="display:none;">
@@ -55,10 +56,10 @@
           <div class="right">
             <label for="editUsername" class="small">Username</label>
             <input id="editUsername" type="text" placeholder="Your username (unique)" />
-            <label for="editBio" class="small">Bio</label>
+            <label for="editBio" class="small" style="margin-top:8px; display: block;">Bio</label>
             <textarea id="editBio" rows="4" placeholder="Write a short bio..."></textarea>
-            <label for="photoInput" class="small">Change photo</label>
-            <input id="photoInput" class="file-input" type="file" accept="image/*" />
+            <label for="photoInput" class="small" style="margin-top:8px; display: block;">Change photo</label>
+            <input id="photoInput" class="file-input" type="file" accept="image/png, image/jpeg, image/webp" />
             <div style="display:flex; gap:8px; margin-top:10px;">
               <button id="saveProfileBtn" class="primary">Save Profile</button>
               <button id="cancelEditBtn">Cancel</button>
@@ -68,8 +69,7 @@
         </div>
       </div>
 
-      <!-- Friends list -->
-      <div id="friendsListContainer">
+      <div id="friendsListContainer" style="display:none;">
         <h3>Friends</h3>
         <ul id="friendsList"></ul>
       </div>
@@ -81,35 +81,12 @@
   </div>
 
   <script type="module">
-    import { 
-      initAuthListener, 
-      fetchFriends, 
-      getCurrentUser 
-    } from './profile.js';
+    import { initAuthListener } from './profile.js';
 
+    // This one line is all you need now!
+    // It kicks off the entire process in profile.js.
     initAuthListener();
-
-    // Render live friends list
-    function updateFriendListUI(friendsArr) {
-      const list = document.getElementById('friendsList');
-      list.innerHTML = '';
-      friendsArr.forEach(friend => {
-        const li = document.createElement('li');
-        li.className = 'friend-item';
-        li.innerHTML = `
-          <img src="${friend.photoURL || 'https://www.gravatar.com/avatar/?d=mp&s=160'}" alt="${friend.username}" />
-          <span>${friend.username || 'Unknown'}</span>
-        `;
-        li.addEventListener('click', () => {
-          if (friend.uid) window.location.href = `profile.html?uid=${friend.uid}`;
-        });
-        list.appendChild(li);
-      });
-    }
-
-    // Initial fetch and live updates
-    const currentUser = getCurrentUser();
-    if (currentUser) fetchFriends(updateFriendListUI);
   </script>
+
 </body>
 </html>
