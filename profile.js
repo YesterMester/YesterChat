@@ -1,4 +1,4 @@
-// profile.js - Fixed version that skips user document creation and focuses on existing profiles
+// profile.js - Complete fixed version with proper error handling and friend sync
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
 import {
@@ -12,7 +12,8 @@ import {
   serverTimestamp,
   getDocs,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  onSnapshot
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import { 
   onAuthStateChanged, 
@@ -34,7 +35,8 @@ const profileState = {
   viewedUid: null,
   viewedProfileData: null,
   isLoading: false,
-  initialized: false
+  initialized: false,
+  friendsListener: null
 };
 
 // Utility functions
@@ -146,11 +148,10 @@ async function loadUserProfile(uid) {
       debugLog("Profile loaded from Firestore:", userData);
       return userData;
     } else {
-      // Profile doesn't exist in Firestore, create basic profile from auth data
-      debugLog(`No Firestore profile found for ${uid}, creating from auth data`);
+      debugLog(`No Firestore profile found for ${uid}`);
       
       if (uid === profileState.currentUser?.uid) {
-        // For current user, create from their auth data
+        // For current user, create basic profile from auth data
         const user = profileState.currentUser;
         const basicProfile = {
           username: user.displayName || (user.email ? user.email.split("@")[0] : "User"),
@@ -159,12 +160,11 @@ async function loadUserProfile(uid) {
           photoURL: user.photoURL || "",
           email: user.email || "",
           friends: [],
-          isBasicProfile: true // Flag to indicate this is a temporary profile
+          isBasicProfile: true
         };
         debugLog("Created basic profile from auth:", basicProfile);
         return basicProfile;
       } else {
-        // For other users, return null if no profile exists
         return null;
       }
     }
@@ -202,6 +202,7 @@ function updateProfileDisplay(userData, isOwnProfile = false) {
   if (profileEmail) {
     if (isOwnProfile) {
       profileEmail.textContent = userData.email || profileState.currentUser?.email || "";
+      profileEmail.style.display = "block";
     } else {
       profileEmail.textContent = "";
       profileEmail.style.display = "none";
@@ -357,26 +358,48 @@ async function sendFriendRequest(toUid) {
   
   const fromUid = profileState.currentUser.uid;
   
-  const pendingCheck = await checkPendingRequests(fromUid, toUid);
+  debugLog(`Attempting to send friend request from ${fromUid} to ${toUid}`);
   
-  if (pendingCheck.exists) {
-    const message = pendingCheck.direction === "outgoing" 
-      ? "You already sent a friend request. Please wait for a response."
-      : "This user has already sent you a request. Check your incoming requests.";
-    throw new Error(message);
+  try {
+    const pendingCheck = await checkPendingRequests(fromUid, toUid);
+    
+    if (pendingCheck.exists) {
+      const message = pendingCheck.direction === "outgoing" 
+        ? "You already sent a friend request. Please wait for a response."
+        : "This user has already sent you a request. Check your incoming requests.";
+      throw new Error(message);
+    }
+    
+    const requestData = {
+      fromUid: fromUid,
+      toUid: toUid,
+      status: "pending",
+      createdAt: serverTimestamp()
+    };
+    
+    debugLog("Creating friend request with data:", requestData);
+    
+    await addDoc(collection(db, "friendRequests"), requestData);
+    debugLog(`Friend request sent successfully from ${fromUid} to ${toUid}`);
+    
+  } catch (error) {
+    debugError("sendFriendRequest failed:", error);
+    
+    if (error.code === 'permission-denied') {
+      throw new Error("Unable to send friend request. Please check your account permissions or try again later.");
+    } else if (error.code === 'invalid-argument') {
+      throw new Error("Invalid request data. Please try again.");
+    } else if (error.code === 'network-request-failed') {
+      throw new Error("Network error. Please check your connection and try again.");
+    } else if (error.message.includes("already sent") || error.message.includes("already received")) {
+      throw error;
+    } else {
+      throw new Error(`Failed to send friend request: ${error.message}`);
+    }
   }
-  
-  const requestData = {
-    fromUid: fromUid,
-    toUid: toUid,
-    status: "pending",
-    createdAt: serverTimestamp()
-  };
-  
-  await addDoc(collection(db, "friendRequests"), requestData);
-  debugLog(`Friend request sent from ${fromUid} to ${toUid}`);
 }
 
+// Enhanced unfriend function that triggers friends list update
 async function removeFriend(friendUid) {
   if (!profileState.currentUser) {
     throw new Error("Not signed in");
@@ -384,23 +407,94 @@ async function removeFriend(friendUid) {
   
   const currentUid = profileState.currentUser.uid;
   
-  const currentUserRef = doc(db, "users", currentUid);
-  await updateDoc(currentUserRef, {
-    friends: arrayRemove(friendUid),
-    updatedAt: serverTimestamp()
-  });
-  
   try {
-    const friendRef = doc(db, "users", friendUid);
-    await updateDoc(friendRef, {
-      friends: arrayRemove(currentUid),
+    debugLog(`Removing friendship between ${currentUid} and ${friendUid}`);
+    
+    // Remove from current user's friends list
+    const currentUserRef = doc(db, "users", currentUid);
+    await updateDoc(currentUserRef, {
+      friends: arrayRemove(friendUid),
       updatedAt: serverTimestamp()
     });
+    
+    debugLog("Removed from current user's friends list");
+    
+    // Try to remove from friend's list (best effort)
+    try {
+      const friendRef = doc(db, "users", friendUid);
+      await updateDoc(friendRef, {
+        friends: arrayRemove(currentUid),
+        updatedAt: serverTimestamp()
+      });
+      debugLog("Removed from friend's friends list");
+    } catch (error) {
+      debugError("Could not update friend's list (this might be expected due to permissions):", error);
+    }
+    
+    // Notify index.html about the friend removal if it exists
+    notifyFriendRemoval(friendUid);
+    
+    debugLog(`Successfully removed friendship between ${currentUid} and ${friendUid}`);
+    
   } catch (error) {
-    debugError("Could not update friend's list:", error);
+    debugError("removeFriend failed:", error);
+    throw new Error(`Failed to remove friend: ${error.message}`);
   }
-  
-  debugLog(`Removed friendship between ${currentUid} and ${friendUid}`);
+}
+
+// Function to notify index.html about friend removal
+function notifyFriendRemoval(removedFriendUid) {
+  try {
+    // Check if we're in an environment where we can communicate with index.html
+    if (typeof window !== 'undefined') {
+      // Try to trigger a friends list refresh on index.html
+      // This works if both pages are open and can communicate
+      if (window.opener && !window.opener.closed) {
+        // If this profile page was opened from index.html
+        window.opener.postMessage({
+          type: 'FRIEND_REMOVED',
+          friendUid: removedFriendUid,
+          timestamp: Date.now()
+        }, window.location.origin);
+        debugLog("Sent friend removal notification to parent window");
+      }
+      
+      // Also store in localStorage for cross-tab communication
+      try {
+        const friendsUpdateEvent = {
+          type: 'FRIEND_REMOVED',
+          friendUid: removedFriendUid,
+          timestamp: Date.now(),
+          userId: profileState.currentUser?.uid
+        };
+        localStorage.setItem('friendsUpdate', JSON.stringify(friendsUpdateEvent));
+        
+        // Trigger storage event for other tabs
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'friendsUpdate',
+          newValue: JSON.stringify(friendsUpdateEvent),
+          storageArea: localStorage
+        }));
+        
+        debugLog("Stored friend removal event in localStorage");
+        
+        // Clean up after a short delay
+        setTimeout(() => {
+          try {
+            localStorage.removeItem('friendsUpdate');
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+        }, 5000);
+        
+      } catch (storageError) {
+        debugError("Could not use localStorage for friend update notification:", storageError);
+      }
+    }
+  } catch (error) {
+    debugError("Failed to notify about friend removal:", error);
+    // Don't throw - this is not critical for the unfriend operation
+  }
 }
 
 async function setupVisitorActions(targetUid, userData) {
@@ -527,42 +621,38 @@ async function createOrUpdateProfile(userData) {
   
   const userRef = doc(db, "users", profileState.currentUser.uid);
   
-  // Check if profile exists
   try {
     const existingSnap = await getDoc(userRef);
-    if (existingSnap.exists()) {
-      // Profile exists, update it
-      debugLog("Updating existing profile");
-      await updateDoc(userRef, {
-        ...userData,
-        updatedAt: serverTimestamp()
-      });
-    } else {
-      // Profile doesn't exist, create it with setDoc
-      debugLog("Creating new profile with setDoc");
-      await updateDoc(userRef, {
-        ...userData,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+    
+    const dataToSave = {
+      ...userData,
+      updatedAt: serverTimestamp()
+    };
+    
+    if (!existingSnap.exists()) {
+      dataToSave.createdAt = serverTimestamp();
     }
+    
+    debugLog("Saving profile data:", dataToSave);
+    await updateDoc(userRef, dataToSave);
+    
   } catch (error) {
     if (error.code === 'not-found') {
-      // Document doesn't exist, we need to create it
-      // This should work with your Firestore rules
-      debugLog("Document not found, creating with updateDoc should create it");
-      await updateDoc(userRef, {
+      // Document doesn't exist, create it
+      const dataToSave = {
         ...userData,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
+      };
+      debugLog("Creating new profile:", dataToSave);
+      await updateDoc(userRef, dataToSave);
     } else {
       throw error;
     }
   }
 }
 
-// Profile saving
+// Enhanced profile saving with improved error handling
 async function saveProfile() {
   if (!profileState.currentUser) {
     showMessage("Not signed in", true);
@@ -613,10 +703,10 @@ async function saveProfile() {
       }
     }
     
-    // Handle photo upload
+    // Handle photo upload with improved error handling
     let uploadedPhotoURL = profileState.viewedProfileData?.photoURL || null;
     if (photoInput?.files?.length > 0) {
-      showMessage("Uploading photo to Cloudinary...", false);
+      showMessage("Uploading photo...", false);
       
       const file = photoInput.files[0];
       
@@ -634,18 +724,31 @@ async function saveProfile() {
       }
       
       try {
-        debugLog("Starting Cloudinary upload...");
-        uploadedPhotoURL = await uploadProfileImage(file, profileState.currentUser.uid);
-        debugLog("Cloudinary upload successful:", uploadedPhotoURL);
-        showMessage("Photo uploaded successfully, saving profile...", false);
-      } catch (uploadError) {
-        debugError("Cloudinary upload failed:", uploadError);
-        let errorMessage = "Photo upload failed: ";
-        if (uploadError.message.includes('network')) {
-          errorMessage += "Network error. Please check your connection and try again.";
-        } else {
-          errorMessage += uploadError.message;
+        debugLog("Starting photo upload...");
+        
+        if (typeof uploadProfileImage !== 'function') {
+          throw new Error("Photo upload service not available. Check cloudinary.js configuration.");
         }
+        
+        uploadedPhotoURL = await uploadProfileImage(file, profileState.currentUser.uid);
+        debugLog("Photo upload successful:", uploadedPhotoURL);
+        showMessage("Photo uploaded successfully, saving profile...", false);
+        
+      } catch (uploadError) {
+        debugError("Photo upload failed:", uploadError);
+        
+        let errorMessage = "Photo upload failed: ";
+        
+        if (uploadError.message.includes('fetch') || uploadError.name === 'TypeError') {
+          errorMessage += "Network connection failed. Check your internet connection and try again.";
+        } else if (uploadError.message.includes('cloudinary') || uploadError.message.includes('upload')) {
+          errorMessage += "Upload service error. Please try again or contact support.";
+        } else if (uploadError.message.includes('configured')) {
+          errorMessage += "Upload service not configured properly.";
+        } else {
+          errorMessage += uploadError.message || "Unknown upload error occurred.";
+        }
+        
         showMessage(errorMessage, true);
         return;
       }
@@ -816,6 +919,54 @@ function setupEventListeners() {
       bioCounter.className = remaining < 50 ? 'char-counter warning' : 'char-counter';
     });
   }
+  
+  // Listen for friend removal notifications from other tabs/windows
+  window.addEventListener('storage', function(e) {
+    if (e.key === 'friendsUpdate' && e.newValue) {
+      try {
+        const updateEvent = JSON.parse(e.newValue);
+        if (updateEvent.type === 'FRIEND_REMOVED' && 
+            updateEvent.userId === profileState.currentUser?.uid) {
+          debugLog("Received friend removal notification from another tab");
+          // Refresh the current profile if we're viewing the removed friend
+          if (profileState.viewedUid === updateEvent.friendUid) {
+            renderProfile(profileState.viewedUid);
+          }
+        }
+      } catch (error) {
+        debugError("Error processing friends update event:", error);
+      }
+    }
+  });
+  
+  // Listen for messages from parent window (if opened from index.html)
+  window.addEventListener('message', function(event) {
+    if (event.origin !== window.location.origin) return;
+    
+    if (event.data.type === 'REFRESH_PROFILE' && profileState.viewedUid) {
+      debugLog("Received profile refresh request from parent window");
+      renderProfile(profileState.viewedUid);
+    }
+  });
+}
+
+// Cleanup function
+function cleanup() {
+  debugLog("Cleaning up profile state and listeners");
+  
+  if (profileState.friendsListener) {
+    try {
+      profileState.friendsListener();
+      profileState.friendsListener = null;
+    } catch (error) {
+      debugError("Error during cleanup:", error);
+    }
+  }
+  
+  profileState.currentUser = null;
+  profileState.viewedUid = null;
+  profileState.viewedProfileData = null;
+  profileState.initialized = false;
 }
 
 // Auth state handler
@@ -827,6 +978,7 @@ function initAuth() {
     
     if (!user) {
       debugLog("No user - redirecting to auth page");
+      cleanup();
       window.location.replace("auth.html");
       return;
     }
@@ -859,6 +1011,11 @@ document.addEventListener('DOMContentLoaded', function() {
   debugLog("Profile page initialization complete");
 });
 
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+  cleanup();
+});
+
 // Global error handlers
 window.addEventListener('error', function(event) {
   debugError("Global error:", event.error);
@@ -866,9 +1023,10 @@ window.addEventListener('error', function(event) {
 
 window.addEventListener('unhandledrejection', function(event) {
   debugError("Unhandled promise rejection:", event.reason);
+  event.preventDefault(); // Prevent the error from showing in console
 });
 
-// Export functions
+// Export functions for external use
 export {
   renderProfile,
   saveProfile,
