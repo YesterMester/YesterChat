@@ -1,4 +1,4 @@
-// profile.js - Bug-free version with proper error handling and structure
+// profile.js - Fixed version with proper permissions and Cloudinary integration
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
 import {
@@ -131,39 +131,60 @@ function validateBio(bio) {
   return { valid: true };
 }
 
-// Firebase functions
+// Fixed user document creation with proper error handling
 async function ensureUserDocExists(user) {
   if (!user || !user.uid) {
     throw new Error("Invalid user object");
   }
   
-  debugLog(`Ensuring user doc exists for ${user.uid}`);
+  debugLog(`Checking if user document exists for ${user.uid}`);
   
   try {
     const userRef = doc(db, "users", user.uid);
     const userSnap = await getDoc(userRef);
     
-    if (!userSnap.exists()) {
-      debugLog("Creating new user document");
-      
-      const defaultUsername = user.email ? user.email.split("@")[0] : "User";
-      const userData = {
-        username: defaultUsername,
-        usernameLower: defaultUsername.toLowerCase(),
-        bio: "",
-        photoURL: user.photoURL || "",
-        friends: [],
-        email: user.email || "",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      };
-      
-      await setDoc(userRef, userData);
-      debugLog("User document created successfully");
+    if (userSnap.exists()) {
+      debugLog("User document already exists");
+      return;
     }
+    
+    debugLog("User document doesn't exist, attempting to create...");
+    
+    // Try to create user document with minimal required fields
+    const defaultUsername = user.email ? user.email.split("@")[0] : `User${Date.now()}`;
+    const userData = {
+      username: defaultUsername,
+      usernameLower: defaultUsername.toLowerCase(),
+      bio: "",
+      photoURL: user.photoURL || "",
+      friends: [],
+      email: user.email || "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+    
+    // Use setDoc with merge option to handle potential permission issues
+    await setDoc(userRef, userData, { merge: true });
+    debugLog("User document created successfully");
+    
   } catch (error) {
     debugError("ensureUserDocExists failed:", error);
-    throw new Error(`Failed to create user document: ${error.message}`);
+    
+    // If setDoc fails, the user might already exist or there are permission issues
+    // Let's try to read it again and if it still doesn't exist, that's a real problem
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const retrySnap = await getDoc(userRef);
+      if (retrySnap.exists()) {
+        debugLog("User document exists after retry - continuing");
+        return;
+      }
+    } catch (retryError) {
+      debugError("Retry check also failed:", retryError);
+    }
+    
+    // If we get here, there's a real permission or configuration problem
+    throw new Error(`Cannot access user profile. This might be a Firestore permission issue. Original error: ${error.message}`);
   }
 }
 
@@ -188,6 +209,12 @@ async function loadUserProfile(uid) {
     return userData;
   } catch (error) {
     debugError("loadUserProfile failed:", error);
+    
+    // Provide more specific error handling
+    if (error.code === 'permission-denied') {
+      throw new Error(`Permission denied reading profile for user ${uid}. Check Firestore rules.`);
+    }
+    
     throw new Error(`Failed to load profile: ${error.message}`);
   }
 }
@@ -505,7 +532,7 @@ async function renderProfile(uid) {
   }
 }
 
-// Profile saving
+// Enhanced profile saving with proper Cloudinary integration
 async function saveProfile() {
   if (!profileState.currentUser) {
     showMessage("Not signed in", true);
@@ -537,51 +564,81 @@ async function saveProfile() {
   }
   
   setLoading(true);
-  showMessage("Checking username availability...", false);
+  showMessage("Saving profile...", false);
   
   try {
-    // Check username uniqueness
-    const usersRef = collection(db, "users");
-    const usernameQuery = query(usersRef, where("usernameLower", "==", newUsername.toLowerCase()));
-    const usernameSnap = await getDocs(usernameQuery);
-    
-    const isUsernameTaken = usernameSnap.docs.some(doc => doc.id !== profileState.currentUser.uid);
-    if (isUsernameTaken) {
-      showMessage("Username already taken. Please choose another.", true);
-      if (editUsername) editUsername.focus();
-      return;
+    // Check username uniqueness (skip if unchanged)
+    if (newUsername.toLowerCase() !== profileState.viewedProfileData?.usernameLower) {
+      showMessage("Checking username availability...", false);
+      
+      const usersRef = collection(db, "users");
+      const usernameQuery = query(usersRef, where("usernameLower", "==", newUsername.toLowerCase()));
+      const usernameSnap = await getDocs(usernameQuery);
+      
+      const isUsernameTaken = usernameSnap.docs.some(doc => doc.id !== profileState.currentUser.uid);
+      if (isUsernameTaken) {
+        showMessage("Username already taken. Please choose another.", true);
+        if (editUsername) editUsername.focus();
+        return;
+      }
     }
     
-    // Handle photo upload
+    // Handle photo upload with Cloudinary
     let uploadedPhotoURL = null;
     if (photoInput?.files?.length > 0) {
-      showMessage("Uploading photo...", false);
+      showMessage("Uploading photo to Cloudinary...", false);
       
       const file = photoInput.files[0];
       
       // Validate file
-      if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+      if (!allowedTypes.includes(file.type)) {
         showMessage("Please select a valid image file (PNG, JPEG, WebP, or GIF)", true);
         return;
       }
       
-      if (file.size > 5 * 1024 * 1024) {
+      // Check file size (5MB limit)
+      const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+      if (file.size > maxSize) {
         showMessage("Image must be smaller than 5MB", true);
         return;
       }
       
       try {
+        debugLog("Starting Cloudinary upload...", {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type
+        });
+        
+        // Use the uploadProfileImage function from cloudinary.js
         uploadedPhotoURL = await uploadProfileImage(file, profileState.currentUser.uid);
-        debugLog("Photo uploaded successfully:", uploadedPhotoURL);
+        
+        debugLog("Cloudinary upload successful:", uploadedPhotoURL);
+        showMessage("Photo uploaded successfully, saving profile...", false);
+        
       } catch (uploadError) {
-        debugError("Photo upload failed:", uploadError);
-        showMessage(`Photo upload failed: ${uploadError.message}`, true);
+        debugError("Cloudinary upload failed:", uploadError);
+        
+        // Provide specific error messages based on the error
+        let errorMessage = "Photo upload failed: ";
+        if (uploadError.message.includes('network')) {
+          errorMessage += "Network error. Please check your connection and try again.";
+        } else if (uploadError.message.includes('size')) {
+          errorMessage += "File is too large. Please use a smaller image.";
+        } else if (uploadError.message.includes('format')) {
+          errorMessage += "Unsupported file format. Please use PNG, JPEG, WebP, or GIF.";
+        } else {
+          errorMessage += uploadError.message;
+        }
+        
+        showMessage(errorMessage, true);
         return;
       }
     }
     
     // Save to Firestore
-    showMessage("Saving profile...", false);
+    showMessage("Updating profile...", false);
     
     const userRef = doc(db, "users", profileState.currentUser.uid);
     const updateData = {
@@ -595,6 +652,7 @@ async function saveProfile() {
       updateData.photoURL = uploadedPhotoURL;
     }
     
+    debugLog("Saving profile data to Firestore:", updateData);
     await updateDoc(userRef, updateData);
     
     // Update Firebase Auth profile (best effort)
@@ -604,9 +662,9 @@ async function saveProfile() {
         authUpdateData.photoURL = uploadedPhotoURL;
       }
       await updateAuthProfile(profileState.currentUser, authUpdateData);
-      debugLog("Auth profile updated successfully");
+      debugLog("Firebase Auth profile updated successfully");
     } catch (authError) {
-      debugError("Auth profile update failed (non-critical):", authError);
+      debugError("Firebase Auth profile update failed (non-critical):", authError);
     }
     
     showMessage("Profile saved successfully!", false);
@@ -614,12 +672,25 @@ async function saveProfile() {
     // Clear file input
     if (photoInput) photoInput.value = "";
     
-    // Re-render profile
+    // Re-render profile to show updated data
     await renderProfile(profileState.currentUser.uid);
+    
+    debugLog("Profile save operation completed");
     
   } catch (error) {
     debugError("saveProfile failed:", error);
-    showMessage(`Failed to save profile: ${error.message}`, true);
+    
+    // Provide more specific error messages
+    let errorMessage = "Failed to save profile: ";
+    if (error.code === 'permission-denied') {
+      errorMessage += "Permission denied. You may not have permission to update this profile.";
+    } else if (error.code === 'network-request-failed') {
+      errorMessage += "Network error. Please check your connection and try again.";
+    } else {
+      errorMessage += error.message;
+    }
+    
+    showMessage(errorMessage, true);
   } finally {
     setLoading(false);
   }
@@ -658,7 +729,8 @@ function setupEventListeners() {
       if (!editAvatarPreview) return;
       
       // Validate file type
-      if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+      if (!allowedTypes.includes(file.type)) {
         showMessage("Please select a valid image file (PNG, JPEG, WebP, or GIF)", true);
         this.value = '';
         return;
@@ -679,6 +751,7 @@ function setupEventListeners() {
           URL.revokeObjectURL(objectURL);
         };
         clearMessage();
+        debugLog("Photo preview loaded successfully");
       } catch (error) {
         debugError("Photo preview failed:", error);
         showMessage("Failed to preview image", true);
@@ -749,7 +822,7 @@ function cleanup() {
   profileState.viewedProfileData = null;
 }
 
-// Auth state handler
+// Fixed auth state handler with better error handling
 function initAuth() {
   debugLog("Initializing auth listener");
   
@@ -766,7 +839,13 @@ function initAuth() {
     try {
       profileState.currentUser = user;
       
-      await ensureUserDocExists(user);
+      // Try to ensure user document exists, but don't fail if it doesn't work
+      try {
+        await ensureUserDocExists(user);
+      } catch (userDocError) {
+        debugError("Could not create user document, but continuing:", userDocError);
+        // Continue anyway - the user might already exist or we might still be able to read their profile
+      }
       
       const targetUid = getQueryParam("uid") || user.uid;
       debugLog(`Rendering profile for target UID: ${targetUid}`);
@@ -775,7 +854,7 @@ function initAuth() {
       
     } catch (error) {
       debugError("Auth initialization failed:", error);
-      showMessage(`Initialization failed: ${error.message}`, true);
+      showMessage(`Failed to initialize profile: ${error.message}`, true);
     }
   });
 }
@@ -790,6 +869,13 @@ document.addEventListener('DOMContentLoaded', function() {
   
   if (missingElements.length > 0) {
     debugError(`Missing required DOM elements: ${missingElements.join(', ')}`);
+  }
+  
+  // Check if Cloudinary module is available
+  if (typeof uploadProfileImage === 'undefined') {
+    debugError("uploadProfileImage function not found - check cloudinary.js import");
+  } else {
+    debugLog("Cloudinary upload function is available");
   }
   
   setupEventListeners();
