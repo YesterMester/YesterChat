@@ -1,4 +1,4 @@
-// profile.js — Enhanced and fixed version with better error handling and architecture
+// profile.js - Fixed version with proper syntax and error handling
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
 import {
@@ -30,31 +30,6 @@ function debugError(message, error = null) {
   console.error(`[PROFILE ERROR] ${message}`, error || '');
 }
 
-/* ===== DOM Elements ===== */
-const DOM = {
-  profileAvatar: document.getElementById("profileAvatar"),
-  profileUsername: document.getElementById("profileUsername"),
-  profileEmail: document.getElementById("profileEmail"),
-  profileBio: document.getElementById("profileBio"),
-  profileActions: document.getElementById("profile-actions"),
-  
-  editArea: document.getElementById("editArea"),
-  editAvatarPreview: document.getElementById("editAvatarPreview"),
-  editUsername: document.getElementById("editUsername"),
-  editBio: document.getElementById("editBio"),
-  photoInput: document.getElementById("photoInput"),
-  saveProfileBtn: document.getElementById("saveProfileBtn"),
-  cancelEditBtn: document.getElementById("cancelEditBtn"),
-  editMsg: document.getElementById("editMsg"),
-  
-  // Topbar elements
-  topbarName: document.getElementById("meName"),
-  topbarAvatar: document.getElementById("meAvatarSmall"),
-  
-  // Loading indicator
-  loadingIndicator: document.getElementById("loadingIndicator")
-};
-
 /* ===== State Management ===== */
 const state = {
   currentUser: null,
@@ -73,11 +48,12 @@ function getQueryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
-function showMessage(element, message, isError = false, timeout = 5000) {
+function showMessage(elementId, message, isError = false, timeout = 5000) {
+  const element = document.getElementById(elementId);
   if (!element) return;
   
   element.textContent = message;
-  element.className = `message ${isError ? 'error' : 'success'}`;
+  element.style.color = isError ? '#e74c3c' : '#27ae60';
   element.style.display = 'block';
   
   if (!isError && timeout) {
@@ -88,15 +64,17 @@ function showMessage(element, message, isError = false, timeout = 5000) {
   }
 }
 
-function clearMessage(element) {
+function clearMessage(elementId) {
+  const element = document.getElementById(elementId);
   if (!element) return;
   element.textContent = '';
   element.style.display = 'none';
 }
 
 function setLoading(isLoading) {
-  if (DOM.loadingIndicator) {
-    DOM.loadingIndicator.style.display = isLoading ? 'block' : 'none';
+  const loadingIndicator = document.getElementById("loadingIndicator");
+  if (loadingIndicator) {
+    loadingIndicator.style.display = isLoading ? 'block' : 'none';
   }
   
   // Disable form elements during loading
@@ -211,73 +189,95 @@ async function renderProfile(uid) {
     debugLog("Profile render complete");
   } catch (err) {
     debugError("renderProfile error:", err);
-    showMessage(DOM.editMsg, `Failed to load profile: ${err.message}`, true);
+    showMessage('editMsg', `Failed to load profile: ${err.message}`, true);
   }
 }
 
 function renderProfileNotFound() {
   debugLog("Rendering profile not found state");
   
-  if (DOM.profileUsername) DOM.profileUsername.textContent = "Profile not found";
-  if (DOM.profileBio) DOM.profileBio.textContent = "This user does not exist or their profile is not available.";
-  if (DOM.profileAvatar) DOM.profileAvatar.src = defaultAvatar();
-  if (DOM.profileEmail) DOM.profileEmail.textContent = "";
-  if (DOM.profileActions) DOM.profileActions.innerHTML = "";
-  if (DOM.editArea) DOM.editArea.style.display = "none";
+  const profileUsername = document.getElementById("profileUsername");
+  const profileBio = document.getElementById("profileBio");
+  const profileAvatar = document.getElementById("profileAvatar");
+  const profileEmail = document.getElementById("profileEmail");
+  const profileActions = document.getElementById("profile-actions");
+  const editArea = document.getElementById("editArea");
+  
+  if (profileUsername) profileUsername.textContent = "Profile not found";
+  if (profileBio) profileBio.textContent = "This user does not exist or their profile is not available.";
+  if (profileAvatar) profileAvatar.src = defaultAvatar();
+  if (profileEmail) profileEmail.textContent = "";
+  if (profileActions) profileActions.innerHTML = "";
+  if (editArea) editArea.style.display = "none";
 }
 
 function updateProfileDisplay(data) {
-  if (DOM.profileAvatar) {
-    DOM.profileAvatar.src = data.photoURL || defaultAvatar();
-    DOM.profileAvatar.onerror = () => {
-      DOM.profileAvatar.src = defaultAvatar();
+  const profileAvatar = document.getElementById("profileAvatar");
+  const profileUsername = document.getElementById("profileUsername");
+  const profileBio = document.getElementById("profileBio");
+  const profileEmail = document.getElementById("profileEmail");
+  
+  if (profileAvatar) {
+    profileAvatar.src = data.photoURL || defaultAvatar();
+    profileAvatar.onerror = function() {
+      this.src = defaultAvatar();
     };
   }
   
-  if (DOM.profileUsername) DOM.profileUsername.textContent = data.username || "Unknown User";
-  if (DOM.profileBio) DOM.profileBio.textContent = data.bio || "No bio provided.";
+  if (profileUsername) profileUsername.textContent = data.username || "Unknown User";
+  if (profileBio) profileBio.textContent = data.bio || "No bio provided.";
   
   // Only show email for own profile
-  if (DOM.profileEmail) {
-    DOM.profileEmail.textContent = (state.viewedUid === state.currentUser?.uid) 
+  if (profileEmail) {
+    profileEmail.textContent = (state.viewedUid === state.currentUser?.uid) 
       ? (data.email || state.currentUser?.email || "") 
       : "";
   }
 }
 
 function updateTopbar(data) {
-  if (DOM.topbarName) DOM.topbarName.textContent = data.username || "You";
-  if (DOM.topbarAvatar) {
-    DOM.topbarAvatar.src = data.photoURL || defaultAvatar();
-    DOM.topbarAvatar.onerror = () => {
-      DOM.topbarAvatar.src = defaultAvatar();
+  const topbarName = document.getElementById("meName");
+  const topbarAvatar = document.getElementById("meAvatarSmall");
+  
+  if (topbarName) topbarName.textContent = data.username || "You";
+  if (topbarAvatar) {
+    topbarAvatar.src = data.photoURL || defaultAvatar();
+    topbarAvatar.onerror = function() {
+      this.src = defaultAvatar();
     };
   }
 }
 
 function showEditArea(data) {
-  if (!DOM.editArea) return;
+  const editArea = document.getElementById("editArea");
+  const editUsername = document.getElementById("editUsername");
+  const editBio = document.getElementById("editBio");
+  const editAvatarPreview = document.getElementById("editAvatarPreview");
   
-  DOM.editArea.style.display = "block";
-  if (DOM.editUsername) DOM.editUsername.value = data.username || "";
-  if (DOM.editBio) DOM.editBio.value = data.bio || "";
-  if (DOM.editAvatarPreview) {
-    DOM.editAvatarPreview.src = data.photoURL || defaultAvatar();
-    DOM.editAvatarPreview.onerror = () => {
-      DOM.editAvatarPreview.src = defaultAvatar();
+  if (!editArea) return;
+  
+  editArea.style.display = "block";
+  if (editUsername) editUsername.value = data.username || "";
+  if (editBio) editBio.value = data.bio || "";
+  if (editAvatarPreview) {
+    editAvatarPreview.src = data.photoURL || defaultAvatar();
+    editAvatarPreview.onerror = function() {
+      this.src = defaultAvatar();
     };
   }
   setupOwnerActions();
 }
 
 function hideEditArea() {
-  if (DOM.editArea) DOM.editArea.style.display = "none";
+  const editArea = document.getElementById("editArea");
+  if (editArea) editArea.style.display = "none";
 }
 
 function setupOwnerActions() {
-  if (!DOM.profileActions) return;
+  const profileActions = document.getElementById("profile-actions");
+  if (!profileActions) return;
   
-  DOM.profileActions.innerHTML = `
+  profileActions.innerHTML = `
     <div class="owner-info">
       <p class="info-text">This is your profile. Use the form below to update your information.</p>
     </div>
@@ -286,72 +286,79 @@ function setupOwnerActions() {
 
 /* ===== Photo Upload Handler ===== */
 function setupPhotoPreview() {
-  if (!DOM.photoInput) return;
+  const photoInput = document.getElementById("photoInput");
+  const editAvatarPreview = document.getElementById("editAvatarPreview");
   
-  DOM.photoInput.addEventListener("change", (e) => {
+  if (!photoInput) return;
+  
+  photoInput.addEventListener("change", function(e) {
     const file = e.target.files[0];
     if (!file) return;
     
     // Validate file type
     if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
-      showMessage(DOM.editMsg, "Please select a valid image file (PNG, JPEG, WebP, or GIF)", true);
+      showMessage('editMsg', "Please select a valid image file (PNG, JPEG, WebP, or GIF)", true);
       e.target.value = '';
       return;
     }
     
     // Validate file size (5MB limit)
     if (file.size > 5 * 1024 * 1024) {
-      showMessage(DOM.editMsg, "Image file must be smaller than 5MB", true);
+      showMessage('editMsg', "Image file must be smaller than 5MB", true);
       e.target.value = '';
       return;
     }
     
     try {
       const url = URL.createObjectURL(file);
-      if (DOM.editAvatarPreview) {
-        DOM.editAvatarPreview.src = url;
-        DOM.editAvatarPreview.onerror = () => {
-          DOM.editAvatarPreview.src = defaultAvatar();
-          showMessage(DOM.editMsg, "Failed to preview image", true);
+      if (editAvatarPreview) {
+        editAvatarPreview.src = url;
+        editAvatarPreview.onerror = function() {
+          this.src = defaultAvatar();
+          showMessage('editMsg', "Failed to preview image", true);
         };
       }
-      clearMessage(DOM.editMsg);
+      clearMessage('editMsg');
     } catch (err) {
       debugError("Photo preview failed:", err);
-      showMessage(DOM.editMsg, "Failed to preview image", true);
+      showMessage('editMsg', "Failed to preview image", true);
     }
   });
 }
 
 /* ===== Profile Save Handler ===== */
 async function saveProfile() {
+  const editUsername = document.getElementById("editUsername");
+  const editBio = document.getElementById("editBio");
+  const photoInput = document.getElementById("photoInput");
+  
   if (!state.currentUser) {
-    showMessage(DOM.editMsg, "Not signed in", true);
+    showMessage('editMsg', "Not signed in", true);
     return;
   }
 
-  const newUsername = DOM.editUsername?.value?.trim() || "";
-  const newBio = DOM.editBio?.value?.trim() || "";
+  const newUsername = editUsername?.value?.trim() || "";
+  const newBio = editBio?.value?.trim() || "";
 
-  clearMessage(DOM.editMsg);
+  clearMessage('editMsg');
 
   // Validate input
   const usernameValidation = validateUsername(newUsername);
   if (!usernameValidation.valid) {
-    showMessage(DOM.editMsg, usernameValidation.message, true);
-    DOM.editUsername?.focus();
+    showMessage('editMsg', usernameValidation.message, true);
+    if (editUsername) editUsername.focus();
     return;
   }
 
   const bioValidation = validateBio(newBio);
   if (!bioValidation.valid) {
-    showMessage(DOM.editMsg, bioValidation.message, true);
-    DOM.editBio?.focus();
+    showMessage('editMsg', bioValidation.message, true);
+    if (editBio) editBio.focus();
     return;
   }
 
   setLoading(true);
-  showMessage(DOM.editMsg, "Checking username availability...", false);
+  showMessage('editMsg', "Checking username availability...", false);
 
   try {
     // Check username uniqueness
@@ -361,29 +368,29 @@ async function saveProfile() {
     const conflict = unameSnap.docs.some(d => d.id !== state.currentUser.uid);
     
     if (conflict) {
-      showMessage(DOM.editMsg, "Username already taken. Please choose another.", true);
-      DOM.editUsername?.focus();
+      showMessage('editMsg', "Username already taken. Please choose another.", true);
+      if (editUsername) editUsername.focus();
       return;
     }
 
     // Handle photo upload if present
     let uploadedUrl = null;
-    if (DOM.photoInput?.files?.length > 0) {
-      showMessage(DOM.editMsg, "Uploading photo...", false);
+    if (photoInput?.files?.length > 0) {
+      showMessage('editMsg', "Uploading photo...", false);
       
-      const file = DOM.photoInput.files[0];
+      const file = photoInput.files[0];
       try {
         uploadedUrl = await uploadProfileImage(file, state.currentUser.uid);
         debugLog("Photo uploaded successfully", uploadedUrl);
       } catch (uploadErr) {
         debugError("Photo upload failed:", uploadErr);
-        showMessage(DOM.editMsg, `Photo upload failed: ${uploadErr.message}`, true);
+        showMessage('editMsg', `Photo upload failed: ${uploadErr.message}`, true);
         return;
       }
     }
 
     // Save to Firestore
-    showMessage(DOM.editMsg, "Saving profile...", false);
+    showMessage('editMsg', "Saving profile...", false);
     
     const userRef = doc(db, "users", state.currentUser.uid);
     const updatePayload = {
@@ -411,10 +418,10 @@ async function saveProfile() {
       // Don't fail the entire save for this
     }
 
-    showMessage(DOM.editMsg, "Profile saved successfully!", false);
+    showMessage('editMsg', "Profile saved successfully!", false);
     
     // Clear file input
-    if (DOM.photoInput) DOM.photoInput.value = "";
+    if (photoInput) photoInput.value = "";
     
     // Re-render profile
     await renderProfile(state.currentUser.uid);
@@ -423,7 +430,7 @@ async function saveProfile() {
 
   } catch (err) {
     debugError("Save profile failed:", err);
-    showMessage(DOM.editMsg, `Failed to save profile: ${err.message}`, true);
+    showMessage('editMsg', `Failed to save profile: ${err.message}`, true);
   } finally {
     setLoading(false);
   }
@@ -431,15 +438,20 @@ async function saveProfile() {
 
 /* ===== Cancel Edit Handler ===== */
 function cancelEdit() {
+  const editUsername = document.getElementById("editUsername");
+  const editBio = document.getElementById("editBio");
+  const editAvatarPreview = document.getElementById("editAvatarPreview");
+  const photoInput = document.getElementById("photoInput");
+  
   if (!state.viewedProfileData) return;
   
   // Reset form to original values
-  if (DOM.editUsername) DOM.editUsername.value = state.viewedProfileData.username || "";
-  if (DOM.editBio) DOM.editBio.value = state.viewedProfileData.bio || "";
-  if (DOM.editAvatarPreview) DOM.editAvatarPreview.src = state.viewedProfileData.photoURL || defaultAvatar();
-  if (DOM.photoInput) DOM.photoInput.value = "";
+  if (editUsername) editUsername.value = state.viewedProfileData.username || "";
+  if (editBio) editBio.value = state.viewedProfileData.bio || "";
+  if (editAvatarPreview) editAvatarPreview.src = state.viewedProfileData.photoURL || defaultAvatar();
+  if (photoInput) photoInput.value = "";
   
-  clearMessage(DOM.editMsg);
+  clearMessage('editMsg');
   debugLog("Edit cancelled");
 }
 
@@ -518,11 +530,13 @@ async function unfriendUser(uid) {
 
 /* ===== Visitor Actions Setup ===== */
 async function setupVisitorActions(uid, profileData) {
-  if (!DOM.profileActions || !state.currentUser || uid === state.currentUser.uid) {
+  const profileActions = document.getElementById("profile-actions");
+  
+  if (!profileActions || !state.currentUser || uid === state.currentUser.uid) {
     return;
   }
 
-  DOM.profileActions.innerHTML = "";
+  profileActions.innerHTML = "";
   
   try {
     // Check current friendship status
@@ -537,39 +551,39 @@ async function setupVisitorActions(uid, profileData) {
       const unfriendBtn = document.createElement("button");
       unfriendBtn.textContent = "Unfriend";
       unfriendBtn.className = "btn-secondary";
-      unfriendBtn.onclick = async () => {
+      unfriendBtn.onclick = async function() {
         if (confirm("Are you sure you want to unfriend this user?")) {
           try {
             await unfriendUser(uid);
-            showMessage(DOM.editMsg, "User removed from friends list", false);
+            showMessage('editMsg', "User removed from friends list", false);
             await renderProfile(uid);
           } catch (err) {
             debugError("Unfriend failed:", err);
-            showMessage(DOM.editMsg, `Failed to unfriend: ${err.message}`, true);
+            showMessage('editMsg', `Failed to unfriend: ${err.message}`, true);
           }
         }
       };
-      DOM.profileActions.appendChild(unfriendBtn);
+      profileActions.appendChild(unfriendBtn);
     } else {
       // Show add friend button
       const addBtn = document.createElement("button");
       addBtn.textContent = "Add Friend";
       addBtn.className = "btn-primary";
-      addBtn.onclick = async () => {
+      addBtn.onclick = async function() {
         try {
           await sendFriendRequest(uid);
-          showMessage(DOM.editMsg, "Friend request sent!", false);
+          showMessage('editMsg', "Friend request sent!", false);
           await renderProfile(uid);
         } catch (err) {
           debugError("Send friend request failed:", err);
-          showMessage(DOM.editMsg, err.message, true);
+          showMessage('editMsg', err.message, true);
         }
       };
-      DOM.profileActions.appendChild(addBtn);
+      profileActions.appendChild(addBtn);
     }
   } catch (err) {
     debugError("setupVisitorActions error:", err);
-    DOM.profileActions.innerHTML = `<p class="error">Failed to load user actions</p>`;
+    profileActions.innerHTML = `<p class="error">Failed to load user actions</p>`;
   }
 }
 
@@ -581,36 +595,40 @@ function setupEventListeners() {
   setupPhotoPreview();
   
   // Save button
-  if (DOM.saveProfileBtn) {
-    DOM.saveProfileBtn.addEventListener("click", async (e) => {
+  const saveProfileBtn = document.getElementById("saveProfileBtn");
+  if (saveProfileBtn) {
+    saveProfileBtn.addEventListener("click", async function(e) {
       e.preventDefault();
       await saveProfile();
     });
   }
   
   // Cancel button
-  if (DOM.cancelEditBtn) {
-    DOM.cancelEditBtn.addEventListener("click", (e) => {
+  const cancelEditBtn = document.getElementById("cancelEditBtn");
+  if (cancelEditBtn) {
+    cancelEditBtn.addEventListener("click", function(e) {
       e.preventDefault();
       cancelEdit();
     });
   }
   
   // Form validation on input
-  if (DOM.editUsername) {
-    DOM.editUsername.addEventListener("blur", () => {
-      const validation = validateUsername(DOM.editUsername.value);
+  const editUsername = document.getElementById("editUsername");
+  if (editUsername) {
+    editUsername.addEventListener("blur", function() {
+      const validation = validateUsername(editUsername.value);
       if (!validation.valid) {
-        showMessage(DOM.editMsg, validation.message, true, 0);
+        showMessage('editMsg', validation.message, true, 0);
       } else {
-        clearMessage(DOM.editMsg);
+        clearMessage('editMsg');
       }
     });
   }
   
-  if (DOM.editBio) {
-    DOM.editBio.addEventListener("input", () => {
-      const remaining = 500 - DOM.editBio.value.length;
+  const editBio = document.getElementById("editBio");
+  if (editBio) {
+    editBio.addEventListener("input", function() {
+      const remaining = 500 - editBio.value.length;
       const counter = document.getElementById("bioCounter");
       if (counter) {
         counter.textContent = `${remaining} characters remaining`;
@@ -642,7 +660,7 @@ function cleanup() {
 function initAuthListener() {
   debugLog("Initializing auth listener");
   
-  onAuthStateChanged(auth, async (user) => {
+  onAuthStateChanged(auth, async function(user) {
     debugLog("Auth state changed", user ? { uid: user.uid, email: user.email } : "null");
     
     if (!user) {
@@ -665,13 +683,13 @@ function initAuthListener() {
       debugLog("Profile initialization complete");
     } catch (err) {
       debugError("Auth initialization error:", err);
-      showMessage(DOM.editMsg, `Failed to initialize profile: ${err.message}`, true);
+      showMessage('editMsg', `Failed to initialize profile: ${err.message}`, true);
     }
   });
 }
 
 /* ===== Initialization ===== */
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", function() {
   debugLog("Profile page DOM loaded");
   
   // Check if required elements exist
@@ -697,8 +715,11 @@ export {
   renderProfile,
   ensureUserDocExists,
   sendFriendRequest,
-  unfriendUser,
-  getCurrentUser: () => state.currentUser
+  unfriendUser
 };
+
+export function getCurrentUser() {
+  return state.currentUser;
+}
 
 debugLog("Profile.js module loaded successfully");
