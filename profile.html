@@ -1,90 +1,717 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>User Profile — Yester Chat</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Profile - Yester Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    /* small inline helpers so profile looks good even before CSS update */
-    body { font-family: Inter,system-ui,Arial; background:#f6f8fb; margin:0; color:#111; }
-    .container { max-width:880px; margin:24px auto; padding:12px; }
-    .profile-card { background:#fff; padding:18px; border-radius:12px; box-shadow:0 8px 20px rgba(10,20,40,0.04); border:1px solid #eee; }
-    .profile-avatar { width:160px; height:160px; border-radius:50%; object-fit:cover; display:block; margin:0 auto 12px; }
-    h1 { margin:0 0 8px 0; text-align:center; }
-    .small { color:#666; font-size:0.9rem; }
-    .bio { margin:10px 0 16px 0; text-align:center; color:#333; }
-    .profile-actions { display:flex; gap:8px; justify-content:center; margin-top:12px; flex-wrap:wrap; }
-    button { padding:8px 12px; border-radius:8px; border:1px solid #ddd; background:#fff; cursor:pointer; }
-    button.primary { background:#2f6cff; color:#fff; border-color:transparent; }
-    .edit-area { margin-top:16px; display:grid; gap:8px; }
-    .edit-area input[type="text"], .edit-area textarea { width:100%; padding:10px; border-radius:8px; border:1px solid #e6e6e6; }
-    .row { display:flex; gap:12px; align-items:center; }
-    .left { flex:0 0 180px; text-align:center; }
-    .right { flex:1; }
-    .file-input { font-size:0.9rem; }
-    #editMsg { color:#555; font-size:0.95rem; margin-top:6px; text-align:center; }
-    .muted { color:#888; font-size:0.9rem; }
-    a.link { color:#2f6cff; text-decoration:none; }
+    /* Reset and base styles */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      min-height: 100vh;
+      padding: 20px 0;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+
+    /* Loading indicator */
+    #loadingIndicator {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 12px 16px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      border: 1px solid #e1e5e9;
+      z-index: 1000;
+      display: none;
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Profile card */
+    .profile-card {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      animation: slideUp 0.6s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .page-title {
+      text-align: center;
+      color: #2d3748;
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 30px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* Avatar section */
+    .avatar-section {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .profile-avatar {
+      width: 160px;
+      height: 160px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 4px solid #fff;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+      transition: transform 0.3s ease;
+      background: #f8f9fa;
+    }
+
+    .profile-avatar:hover {
+      transform: scale(1.05);
+    }
+
+    /* Profile info */
+    .profile-info {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    #profileUsername {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #2d3748;
+      margin-bottom: 8px;
+    }
+
+    #profileEmail {
+      color: #718096;
+      font-size: 1rem;
+      margin-bottom: 16px;
+    }
+
+    #profileBio {
+      color: #4a5568;
+      font-size: 1.1rem;
+      max-width: 500px;
+      margin: 0 auto;
+      line-height: 1.6;
+      font-style: italic;
+    }
+
+    /* Action buttons */
+    .profile-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin: 30px 0;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 12px 24px;
+      border-radius: 12px;
+      border: none;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-2px);
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #4a5568;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: #cbd5e0;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #fc8181, #f56565);
+      color: white;
+      box-shadow: 0 4px 15px rgba(245, 101, 101, 0.3);
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      box-shadow: 0 8px 25px rgba(245, 101, 101, 0.4);
+    }
+
+    /* Edit area */
+    .edit-area {
+      background: #f8f9fa;
+      border-radius: 16px;
+      padding: 30px;
+      margin-top: 30px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .edit-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #2d3748;
+      margin-bottom: 25px;
+      text-align: center;
+    }
+
+    .edit-row {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 30px;
+      align-items: start;
+    }
+
+    .edit-left {
+      text-align: center;
+    }
+
+    .edit-right {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .avatar-preview-section {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .preview-label {
+      color: #718096;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    #editAvatarPreview {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 3px solid #e2e8f0;
+      background: #f8f9fa;
+    }
+
+    .preview-hint {
+      color: #a0aec0;
+      font-size: 0.8rem;
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+
+    /* Form elements */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-label {
+      color: #4a5568;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .form-input,
+    .form-textarea {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-family: inherit;
+      transition: all 0.3s ease;
+      background: white;
+    }
+
+    .form-input:focus,
+    .form-textarea:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .form-textarea {
+      resize: vertical;
+      min-height: 100px;
+      max-height: 200px;
+    }
+
+    .file-input {
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      border: 2px dashed #cbd5e0;
+      border-radius: 8px;
+      background: #f8f9fa;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .file-input:hover {
+      border-color: #667eea;
+      background: rgba(102, 126, 234, 0.05);
+    }
+
+    .form-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    /* Character counter */
+    .char-counter {
+      font-size: 0.8rem;
+      color: #718096;
+      text-align: right;
+    }
+
+    .char-counter.warning {
+      color: #f56565;
+    }
+
+    /* Messages */
+    .message {
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin: 16px 0;
+      font-weight: 500;
+      text-align: center;
+      display: none;
+    }
+
+    .message.success {
+      background: #c6f6d5;
+      color: #22543d;
+      border: 1px solid #9ae6b4;
+    }
+
+    .message.error {
+      background: #fed7d7;
+      color: #742a2a;
+      border: 1px solid #feb2b2;
+    }
+
+    /* Owner info */
+    .owner-info {
+      text-align: center;
+      padding: 20px;
+      background: rgba(102, 126, 234, 0.05);
+      border-radius: 12px;
+      border: 1px solid rgba(102, 126, 234, 0.1);
+    }
+
+    .info-text {
+      color: #4c51bf;
+      font-weight: 500;
+      margin: 0;
+    }
+
+    /* Navigation */
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #667eea;
+      text-decoration: none;
+      font-weight: 600;
+      margin-top: 30px;
+      padding: 12px 20px;
+      background: rgba(102, 126, 234, 0.1);
+      border-radius: 10px;
+      transition: all 0.3s ease;
+    }
+
+    .nav-link:hover {
+      background: rgba(102, 126, 234, 0.2);
+      transform: translateX(-5px);
+    }
+
+    .nav-section {
+      text-align: center;
+      margin-top: 30px;
+      padding-top: 30px;
+      border-top: 1px solid #e2e8f0;
+    }
+
+    /* Responsive design */
+    @media (max-width: 768px) {
+      body {
+        padding: 10px 0;
+      }
+
+      .container {
+        padding: 0 15px;
+      }
+
+      .profile-card {
+        padding: 25px 20px;
+        border-radius: 16px;
+      }
+
+      .page-title {
+        font-size: 1.8rem;
+        margin-bottom: 25px;
+      }
+
+      .profile-avatar {
+        width: 120px;
+        height: 120px;
+      }
+
+      #profileUsername {
+        font-size: 1.6rem;
+      }
+
+      .edit-row {
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+
+      .edit-left {
+        order: 2;
+      }
+
+      .edit-right {
+        order: 1;
+      }
+
+      .form-actions {
+        flex-direction: column;
+      }
+
+      .form-actions button {
+        width: 100%;
+      }
+
+      .profile-actions {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .profile-actions button {
+        width: 100%;
+        max-width: 300px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .profile-card {
+        padding: 20px 15px;
+      }
+
+      .page-title {
+        font-size: 1.5rem;
+      }
+
+      .profile-avatar {
+        width: 100px;
+        height: 100px;
+      }
+
+      #profileUsername {
+        font-size: 1.4rem;
+      }
+
+      #profileBio {
+        font-size: 1rem;
+      }
+
+      .edit-area {
+        padding: 20px 15px;
+      }
+
+      .avatar-preview-section {
+        padding: 15px;
+      }
+
+      #editAvatarPreview {
+        width: 80px;
+        height: 80px;
+      }
+    }
+
+    /* Accessibility improvements */
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* Focus indicators */
+    button:focus,
+    input:focus,
+    textarea:focus {
+      outline: 2px solid #667eea;
+      outline-offset: 2px;
+    }
+
+    /* High contrast mode */
+    @media (prefers-contrast: high) {
+      .profile-card {
+        border: 2px solid #333;
+      }
+      
+      button {
+        border: 2px solid currentColor;
+      }
+    }
   </style>
 </head>
 <body>
+  <!-- Loading indicator -->
+  <div id="loadingIndicator">
+    <span class="loading-spinner"></span>
+    Loading profile...
+  </div>
+
   <div class="container">
     <div class="profile-card">
-      <h1>Profile</h1>
+      <!-- Page title -->
+      <h1 class="page-title">User Profile</h1>
 
-      <!-- Avatar & preview -->
-      <div style="display:flex; justify-content:center;">
-        <img id="profileAvatar" src="https://www.gravatar.com/avatar/?d=mp&s=160" class="profile-avatar" alt="Profile Photo" />
+      <!-- Avatar section -->
+      <div class="avatar-section">
+        <img 
+          id="profileAvatar" 
+          src="https://www.gravatar.com/avatar/?d=mp&s=160" 
+          class="profile-avatar" 
+          alt="Profile Photo"
+          onerror="this.src='https://www.gravatar.com/avatar/?d=mp&s=160'"
+        >
       </div>
 
-      <!-- Username & email -->
-      <h2 id="profileUsername" style="text-align:center; margin:8px 0;">Username</h2>
-      <div style="text-align:center;" class="small" id="profileEmail">email@example.com</div>
+      <!-- Profile info -->
+      <div class="profile-info">
+        <h2 id="profileUsername">Loading...</h2>
+        <div id="profileEmail" class="profile-email"></div>
+        <p id="profileBio">Loading profile...</p>
+      </div>
 
-      <!-- Bio -->
-      <p id="profileBio" class="bio">This is your bio. It can be a few lines long.</p>
-
-      <!-- Actions area (Add friend / Accept / Edit / Unfriend) -->
-      <div id="profile-actions" class="profile-actions" aria-live="polite">
+      <!-- Actions area (Add friend / Unfriend / etc) -->
+      <div id="profile-actions" class="profile-actions" role="region" aria-label="Profile actions">
         <!-- Buttons are injected by profile.js based on relationship and ownership -->
       </div>
 
-      <!-- Edit area — only shown to the profile owner -->
-      <div id="editArea" class="edit-area" style="display:none; margin-top:18px;">
-        <div class="row">
-          <div class="left">
-            <div class="muted">Current avatar</div>
-            <img id="editAvatarPreview" src="https://www.gravatar.com/avatar/?d=mp&s=160" style="width:96px;height:96px;border-radius:50%;object-fit:cover;margin-top:8px;" alt="Preview" />
-            <div class="muted" style="margin-top:8px;font-size:0.85rem;">Square images look best.</div>
+      <!-- Messages area -->
+      <div id="editMsg" class="message" role="alert" aria-live="polite"></div>
+
+      <!-- Edit area (only shown to profile owner) -->
+      <div id="editArea" class="edit-area" style="display: none;" role="region" aria-label="Edit profile">
+        <h3 class="edit-title">Edit Your Profile</h3>
+        
+        <div class="edit-row">
+          <!-- Avatar preview -->
+          <div class="edit-left">
+            <div class="avatar-preview-section">
+              <div class="preview-label">Current Avatar</div>
+              <img 
+                id="editAvatarPreview" 
+                src="https://www.gravatar.com/avatar/?d=mp&s=160" 
+                alt="Avatar preview"
+                onerror="this.src='https://www.gravatar.com/avatar/?d=mp&s=160'"
+              >
+              <div class="preview-hint">Square images work best.<br>Max size: 5MB</div>
+            </div>
           </div>
 
-          <div class="right">
-            <label for="editUsername" class="small">Username</label>
-            <input id="editUsername" type="text" placeholder="Your username (unique)" />
-
-            <label for="editBio" class="small">Bio</label>
-            <textarea id="editBio" rows="4" placeholder="Write a short bio..."></textarea>
-
-            <label for="photoInput" class="small">Change photo</label>
-            <input id="photoInput" class="file-input" type="file" accept="image/*" />
-
-            <div style="display:flex; gap:8px; margin-top:10px;">
-              <button id="saveProfileBtn" class="primary">Save Profile</button>
-              <button id="cancelEditBtn">Cancel</button>
+          <!-- Edit form -->
+          <div class="edit-right">
+            <div class="form-group">
+              <label for="editUsername" class="form-label">Username</label>
+              <input 
+                id="editUsername" 
+                type="text" 
+                class="form-input"
+                placeholder="Enter your username"
+                maxlength="30"
+                required
+                aria-describedby="username-help"
+              >
+              <div id="username-help" class="preview-hint">2-30 characters, letters, numbers, spaces, dots, underscores, and hyphens only</div>
             </div>
 
-            <div id="editMsg" class="muted"></div>
+            <div class="form-group">
+              <label for="editBio" class="form-label">Bio</label>
+              <textarea 
+                id="editBio" 
+                class="form-textarea"
+                placeholder="Write a short bio about yourself..."
+                maxlength="500"
+                aria-describedby="bio-help bio-counter"
+              ></textarea>
+              <div id="bio-counter" class="char-counter">500 characters remaining</div>
+              <div id="bio-help" class="preview-hint">Tell others about yourself (optional, max 500 characters)</div>
+            </div>
+
+            <div class="form-group">
+              <label for="photoInput" class="form-label">Profile Photo</label>
+              <input 
+                id="photoInput" 
+                class="file-input" 
+                type="file" 
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                aria-describedby="photo-help"
+              >
+              <div id="photo-help" class="preview-hint">Choose a PNG, JPEG, WebP, or GIF image (max 5MB)</div>
+            </div>
+
+            <div class="form-actions">
+              <button id="saveProfileBtn" class="btn-primary" type="button">
+                Save Profile
+              </button>
+              <button id="cancelEditBtn" class="btn-secondary" type="button">
+                Cancel Changes
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <div style="margin-top:18px; text-align:center;">
-        <a class="link" href="index.html">&larr; Back to chat</a>
+      <!-- Navigation -->
+      <div class="nav-section">
+        <a href="index.html" class="nav-link">
+          ← Back to Chat
+        </a>
       </div>
     </div>
   </div>
 
+  <!-- Scripts -->
   <script type="module" src="profile.js"></script>
+
+  <script>
+    // Additional UI enhancements
+    document.addEventListener('DOMContentLoaded', function() {
+      // Bio character counter
+      const bioTextarea = document.getElementById('editBio');
+      const bioCounter = document.getElementById('bio-counter');
+      
+      if (bioTextarea && bioCounter) {
+        bioTextarea.addEventListener('input', function() {
+          const remaining = 500 - this.value.length;
+          bioCounter.textContent = `${remaining} characters remaining`;
+          bioCounter.className = remaining < 50 ? 'char-counter warning' : 'char-counter';
+        });
+      }
+
+      // File input enhancement
+      const photoInput = document.getElementById('photoInput');
+      if (photoInput) {
+        photoInput.addEventListener('change', function() {
+          const file = this.files[0];
+          if (file) {
+            const fileSize = (file.size / (1024 * 1024)).toFixed(2);
+            console.log(`Selected file: ${file.name} (${fileSize} MB)`);
+          }
+        });
+      }
+
+      // Profile avatar error handling
+      const profileAvatar = document.getElementById('profileAvatar');
+      if (profileAvatar) {
+        profileAvatar.addEventListener('error', function() {
+          console.warn('Profile avatar failed to load, using default');
+        });
+      }
+
+      // Smooth scroll for navigation
+      const navLinks = document.querySelectorAll('a[href^="#"]');
+      navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+          e.preventDefault();
+          const target = document.querySelector(this.getAttribute('href'));
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth' });
+          }
+        });
+      });
+    });
+
+    // Global error handler
+    window.addEventListener('error', function(event) {
+      console.error('Profile page error:', event.error);
+    });
+
+    // Unhandled promise rejection handler
+    window.addEventListener('unhandledrejection', function(event) {
+      console.error('Unhandled promise rejection:', event.reason);
+    });
+  </script>
 </body>
 </html>
