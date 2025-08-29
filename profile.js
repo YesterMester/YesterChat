@@ -1,4 +1,4 @@
-// profile.js — Part 1/3 (imports, DOM, helpers, auth init, renderProfile)
+// profile.js — Enhanced and fixed version with better error handling and architecture
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
 import {
@@ -11,609 +11,694 @@ import {
   where,
   serverTimestamp,
   setDoc,
-  getDocs as _getDocs,
-  arrayUnion
+  getDocs,
+  arrayUnion,
+  arrayRemove,
+  onSnapshot
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
-import { onAuthStateChanged, updateProfile as updateAuthProfile } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { 
+  onAuthStateChanged, 
+  updateProfile as updateAuthProfile 
+} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 
-/* ---------- DOM ---------- */
-const profileAvatar = document.getElementById("profileAvatar");
-const profileUsername = document.getElementById("profileUsername");
-const profileEmail = document.getElementById("profileEmail");
-const profileBio = document.getElementById("profileBio");
-const profileActions = document.getElementById("profile-actions");
+/* ===== Debug Logging ===== */
+function debugLog(message, data = null) {
+  console.log(`[PROFILE DEBUG] ${message}`, data || '');
+}
 
-const editArea = document.getElementById("editArea");
-const editAvatarPreview = document.getElementById("editAvatarPreview");
-const editUsername = document.getElementById("editUsername");
-const editBio = document.getElementById("editBio");
-const photoInput = document.getElementById("photoInput");
-const saveProfileBtn = document.getElementById("saveProfileBtn");
-const cancelEditBtn = document.getElementById("cancelEditBtn");
-const editMsg = document.getElementById("editMsg");
+function debugError(message, error = null) {
+  console.error(`[PROFILE ERROR] ${message}`, error || '');
+}
 
-/* Topbar elements to update after saving */
-const topbarName = document.getElementById("meName");
-const topbarAvatar = document.getElementById("meAvatarSmall");
+/* ===== DOM Elements ===== */
+const DOM = {
+  profileAvatar: document.getElementById("profileAvatar"),
+  profileUsername: document.getElementById("profileUsername"),
+  profileEmail: document.getElementById("profileEmail"),
+  profileBio: document.getElementById("profileBio"),
+  profileActions: document.getElementById("profile-actions"),
+  
+  editArea: document.getElementById("editArea"),
+  editAvatarPreview: document.getElementById("editAvatarPreview"),
+  editUsername: document.getElementById("editUsername"),
+  editBio: document.getElementById("editBio"),
+  photoInput: document.getElementById("photoInput"),
+  saveProfileBtn: document.getElementById("saveProfileBtn"),
+  cancelEditBtn: document.getElementById("cancelEditBtn"),
+  editMsg: document.getElementById("editMsg"),
+  
+  // Topbar elements
+  topbarName: document.getElementById("meName"),
+  topbarAvatar: document.getElementById("meAvatarSmall"),
+  
+  // Loading indicator
+  loadingIndicator: document.getElementById("loadingIndicator")
+};
 
-/* ---------- Helpers ---------- */
+/* ===== State Management ===== */
+const state = {
+  currentUser: null,
+  viewedUid: null,
+  viewedProfileData: null,
+  isEditing: false,
+  unsubscribes: []
+};
+
+/* ===== Utility Functions ===== */
 function defaultAvatar() {
   return "https://www.gravatar.com/avatar/?d=mp&s=160";
 }
-function qsParam(name) {
+
+function getQueryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
-/* ---------- State ---------- */
-const profileUid = qsParam("uid");
-let currentUser = null;
-let viewedUid = null;
-let viewedProfileData = null;
-
-/* ---------- Auth init (exposed via initAuthListener called later) ---------- */
-export function initAuthListener() {
-  // Use onAuthStateChanged to initialize page
-  onAuthStateChanged(auth, async (user) => {
-    if (!user) {
-      // Not signed in — send to auth page (keep previous UX)
-      window.location.replace("auth.html");
-      return;
-    }
-    currentUser = user;
-    viewedUid = profileUid || currentUser.uid;
-    try {
-      await ensureUserDocExists(currentUser);
-      await renderProfile(viewedUid);
-    } catch (err) {
-      console.error("Auth init error in profile.js:", err);
-    }
-  });
+function showMessage(element, message, isError = false, timeout = 5000) {
+  if (!element) return;
+  
+  element.textContent = message;
+  element.className = `message ${isError ? 'error' : 'success'}`;
+  element.style.display = 'block';
+  
+  if (!isError && timeout) {
+    setTimeout(() => {
+      element.style.display = 'none';
+      element.textContent = '';
+    }, timeout);
+  }
 }
 
-/* Ensure users/{uid} exists (creates minimal profile if missing) */
-export async function ensureUserDocExists(user) {
-  if (!user) return;
+function clearMessage(element) {
+  if (!element) return;
+  element.textContent = '';
+  element.style.display = 'none';
+}
+
+function setLoading(isLoading) {
+  if (DOM.loadingIndicator) {
+    DOM.loadingIndicator.style.display = isLoading ? 'block' : 'none';
+  }
+  
+  // Disable form elements during loading
+  const buttons = document.querySelectorAll('button');
+  const inputs = document.querySelectorAll('input, textarea');
+  
+  buttons.forEach(btn => btn.disabled = isLoading);
+  inputs.forEach(input => input.disabled = isLoading);
+}
+
+function validateUsername(username) {
+  if (!username || username.trim().length < 2) {
+    return { valid: false, message: "Username must be at least 2 characters" };
+  }
+  if (username.length > 30) {
+    return { valid: false, message: "Username must be 30 characters or less" };
+  }
+  const validChars = /^[a-zA-Z0-9\s._-]+$/;
+  if (!validChars.test(username)) {
+    return { valid: false, message: "Username can only contain letters, numbers, spaces, dots, underscores, and hyphens" };
+  }
+  return { valid: true };
+}
+
+function validateBio(bio) {
+  if (bio && bio.length > 500) {
+    return { valid: false, message: "Bio must be 500 characters or less" };
+  }
+  return { valid: true };
+}
+
+/* ===== Core Functions ===== */
+async function ensureUserDocExists(user) {
+  if (!user) throw new Error("No user provided");
+  
+  debugLog(`Ensuring user doc exists for ${user.uid}`);
+  
   const ref = doc(db, "users", user.uid);
   try {
     const snap = await getDoc(ref);
     if (!snap.exists()) {
-      // Create a safe minimal profile
+      debugLog("Creating new user document");
       const usernameDefault = user.email ? user.email.split("@")[0] : "User";
       await setDoc(ref, {
         username: usernameDefault,
         usernameLower: usernameDefault.toLowerCase(),
         bio: "",
-        photoURL: "",
+        photoURL: user.photoURL || "",
         friends: [],
+        email: user.email || "",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
     }
   } catch (err) {
-    console.error("ensureUserDocExists error:", err);
-    throw err;
+    debugError("ensureUserDocExists error:", err);
+    throw new Error(`Failed to ensure user document: ${err.message}`);
   }
 }
 
-/* ---------- Render profile ---------- */
-export async function renderProfile(uid) {
+async function loadProfile(uid) {
+  if (!uid) throw new Error("No uid provided to loadProfile");
+  
+  debugLog(`Loading profile for ${uid}`);
+  setLoading(true);
+  
   try {
-    if (!uid) {
-      throw new Error("No uid provided to renderProfile");
-    }
     const ref = doc(db, "users", uid);
     const snap = await getDoc(ref);
 
     if (!snap.exists()) {
-      // gracefully handle missing profile
-      if (profileUsername) profileUsername.textContent = "Profile not found";
-      if (profileBio) profileBio.textContent = "";
-      if (profileAvatar) profileAvatar.src = defaultAvatar();
-      if (profileEmail) profileEmail.textContent = "";
-      if (profileActions) profileActions.innerHTML = "";
-      if (editArea) editArea.style.display = "none";
-      return;
+      debugError(`Profile not found for uid: ${uid}`);
+      return null;
     }
 
     const data = snap.data();
-    viewedProfileData = data;
-
-    if (profileAvatar) profileAvatar.src = data.photoURL || defaultAvatar();
-    if (profileUsername) profileUsername.textContent = data.username || "Unknown";
-    if (profileEmail) profileEmail.textContent = (uid === currentUser?.uid) ? (auth.currentUser?.email || "") : "";
-    if (profileBio) profileBio.textContent = data.bio || "";
-
-    // Update topbar if viewing self
-    if (uid === currentUser?.uid) {
-      if (topbarName) topbarName.textContent = data.username || "You";
-      if (topbarAvatar) topbarAvatar.src = data.photoURL || defaultAvatar();
-    }
-
-    // Show edit area if viewing own profile
-    if (uid === currentUser?.uid) {
-      if (editArea) editArea.style.display = "block";
-      if (editUsername) editUsername.value = data.username || "";
-      if (editBio) editBio.value = data.bio || "";
-      if (editAvatarPreview) editAvatarPreview.src = data.photoURL || defaultAvatar();
-      setupOwnerActions();
-    } else {
-      if (editArea) editArea.style.display = "none";
-      await setupVisitorActions(uid, data);
-    }
+    debugLog("Profile loaded successfully", data);
+    return data;
   } catch (err) {
-    console.error("renderProfile error:", err);
-    alert("Failed to load profile. See console for details.");
+    debugError("loadProfile error:", err);
+    throw new Error(`Failed to load profile: ${err.message}`);
+  } finally {
+    setLoading(false);
   }
 }
-// profile.js — Part 2/3 (owner edit handlers, visitor actions, utilities)
 
-/* ---------- Owner edit handlers (photo preview, cancel, save) ---------- */
-if (photoInput) {
-  photoInput.addEventListener("change", () => {
-    const f = photoInput.files[0];
-    if (!f) return;
-    try {
-      const url = URL.createObjectURL(f);
-      if (editAvatarPreview) editAvatarPreview.src = url;
-    } catch (err) {
-      console.warn("Preview creation failed:", err);
-    }
-  });
-}
-
-if (cancelEditBtn) {
-  cancelEditBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    if (!viewedProfileData) return;
-    if (editUsername) editUsername.value = viewedProfileData.username || "";
-    if (editBio) editBio.value = viewedProfileData.bio || "";
-    if (editAvatarPreview) editAvatarPreview.src = viewedProfileData.photoURL || defaultAvatar();
-    if (photoInput) photoInput.value = "";
-    if (editMsg) editMsg.textContent = "";
-  });
-}
-
-if (saveProfileBtn) {
-  saveProfileBtn.addEventListener("click", async (e) => {
-    e.preventDefault();
-    if (!currentUser) return alert("Not signed in.");
-
-    const newUsername = (editUsername?.value || "").trim();
-    const newBio = (editBio?.value || "").trim();
-
-    if (!newUsername || newUsername.length < 2) {
-      if (editMsg) editMsg.textContent = "Username must be at least 2 characters.";
-      return;
-    }
-    if (newUsername.length > 30) {
-      if (editMsg) editMsg.textContent = "Username must be 30 characters or less.";
+async function renderProfile(uid) {
+  try {
+    debugLog(`Rendering profile for ${uid}`);
+    
+    const data = await loadProfile(uid);
+    if (!data) {
+      renderProfileNotFound();
       return;
     }
 
-    if (editMsg) editMsg.textContent = "Checking username availability...";
+    state.viewedUid = uid;
+    state.viewedProfileData = data;
 
+    // Update profile display
+    updateProfileDisplay(data);
+    
+    // Update topbar if viewing own profile
+    if (uid === state.currentUser?.uid) {
+      updateTopbar(data);
+      showEditArea(data);
+    } else {
+      hideEditArea();
+      await setupVisitorActions(uid, data);
+    }
+    
+    debugLog("Profile render complete");
+  } catch (err) {
+    debugError("renderProfile error:", err);
+    showMessage(DOM.editMsg, `Failed to load profile: ${err.message}`, true);
+  }
+}
+
+function renderProfileNotFound() {
+  debugLog("Rendering profile not found state");
+  
+  if (DOM.profileUsername) DOM.profileUsername.textContent = "Profile not found";
+  if (DOM.profileBio) DOM.profileBio.textContent = "This user does not exist or their profile is not available.";
+  if (DOM.profileAvatar) DOM.profileAvatar.src = defaultAvatar();
+  if (DOM.profileEmail) DOM.profileEmail.textContent = "";
+  if (DOM.profileActions) DOM.profileActions.innerHTML = "";
+  if (DOM.editArea) DOM.editArea.style.display = "none";
+}
+
+function updateProfileDisplay(data) {
+  if (DOM.profileAvatar) {
+    DOM.profileAvatar.src = data.photoURL || defaultAvatar();
+    DOM.profileAvatar.onerror = () => {
+      DOM.profileAvatar.src = defaultAvatar();
+    };
+  }
+  
+  if (DOM.profileUsername) DOM.profileUsername.textContent = data.username || "Unknown User";
+  if (DOM.profileBio) DOM.profileBio.textContent = data.bio || "No bio provided.";
+  
+  // Only show email for own profile
+  if (DOM.profileEmail) {
+    DOM.profileEmail.textContent = (state.viewedUid === state.currentUser?.uid) 
+      ? (data.email || state.currentUser?.email || "") 
+      : "";
+  }
+}
+
+function updateTopbar(data) {
+  if (DOM.topbarName) DOM.topbarName.textContent = data.username || "You";
+  if (DOM.topbarAvatar) {
+    DOM.topbarAvatar.src = data.photoURL || defaultAvatar();
+    DOM.topbarAvatar.onerror = () => {
+      DOM.topbarAvatar.src = defaultAvatar();
+    };
+  }
+}
+
+function showEditArea(data) {
+  if (!DOM.editArea) return;
+  
+  DOM.editArea.style.display = "block";
+  if (DOM.editUsername) DOM.editUsername.value = data.username || "";
+  if (DOM.editBio) DOM.editBio.value = data.bio || "";
+  if (DOM.editAvatarPreview) {
+    DOM.editAvatarPreview.src = data.photoURL || defaultAvatar();
+    DOM.editAvatarPreview.onerror = () => {
+      DOM.editAvatarPreview.src = defaultAvatar();
+    };
+  }
+  setupOwnerActions();
+}
+
+function hideEditArea() {
+  if (DOM.editArea) DOM.editArea.style.display = "none";
+}
+
+function setupOwnerActions() {
+  if (!DOM.profileActions) return;
+  
+  DOM.profileActions.innerHTML = `
+    <div class="owner-info">
+      <p class="info-text">This is your profile. Use the form below to update your information.</p>
+    </div>
+  `;
+}
+
+/* ===== Photo Upload Handler ===== */
+function setupPhotoPreview() {
+  if (!DOM.photoInput) return;
+  
+  DOM.photoInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    // Validate file type
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+      showMessage(DOM.editMsg, "Please select a valid image file (PNG, JPEG, WebP, or GIF)", true);
+      e.target.value = '';
+      return;
+    }
+    
+    // Validate file size (5MB limit)
+    if (file.size > 5 * 1024 * 1024) {
+      showMessage(DOM.editMsg, "Image file must be smaller than 5MB", true);
+      e.target.value = '';
+      return;
+    }
+    
     try {
-      // Ensure username uniqueness (case-insensitive)
-      const usersCol = collection(db, "users");
-      const unameQ = query(usersCol, where("usernameLower", "==", newUsername.toLowerCase()));
-      const unameSnap = await _getDocs(unameQ);
-      const conflict = unameSnap.docs.some(d => d.id !== currentUser.uid);
-      if (conflict) {
-        if (editMsg) editMsg.textContent = "Username already taken — choose another.";
-        return;
+      const url = URL.createObjectURL(file);
+      if (DOM.editAvatarPreview) {
+        DOM.editAvatarPreview.src = url;
+        DOM.editAvatarPreview.onerror = () => {
+          DOM.editAvatarPreview.src = defaultAvatar();
+          showMessage(DOM.editMsg, "Failed to preview image", true);
+        };
       }
+      clearMessage(DOM.editMsg);
     } catch (err) {
-      console.error("username check failed:", err);
-      if (editMsg) editMsg.textContent = "Failed to validate username. Try again.";
+      debugError("Photo preview failed:", err);
+      showMessage(DOM.editMsg, "Failed to preview image", true);
+    }
+  });
+}
+
+/* ===== Profile Save Handler ===== */
+async function saveProfile() {
+  if (!state.currentUser) {
+    showMessage(DOM.editMsg, "Not signed in", true);
+    return;
+  }
+
+  const newUsername = DOM.editUsername?.value?.trim() || "";
+  const newBio = DOM.editBio?.value?.trim() || "";
+
+  clearMessage(DOM.editMsg);
+
+  // Validate input
+  const usernameValidation = validateUsername(newUsername);
+  if (!usernameValidation.valid) {
+    showMessage(DOM.editMsg, usernameValidation.message, true);
+    DOM.editUsername?.focus();
+    return;
+  }
+
+  const bioValidation = validateBio(newBio);
+  if (!bioValidation.valid) {
+    showMessage(DOM.editMsg, bioValidation.message, true);
+    DOM.editBio?.focus();
+    return;
+  }
+
+  setLoading(true);
+  showMessage(DOM.editMsg, "Checking username availability...", false);
+
+  try {
+    // Check username uniqueness
+    const usersCol = collection(db, "users");
+    const unameQuery = query(usersCol, where("usernameLower", "==", newUsername.toLowerCase()));
+    const unameSnap = await getDocs(unameQuery);
+    const conflict = unameSnap.docs.some(d => d.id !== state.currentUser.uid);
+    
+    if (conflict) {
+      showMessage(DOM.editMsg, "Username already taken. Please choose another.", true);
+      DOM.editUsername?.focus();
       return;
     }
 
-    // Optional image upload
+    // Handle photo upload if present
     let uploadedUrl = null;
-    if (photoInput && photoInput.files && photoInput.files.length > 0) {
+    if (DOM.photoInput?.files?.length > 0) {
+      showMessage(DOM.editMsg, "Uploading photo...", false);
+      
+      const file = DOM.photoInput.files[0];
       try {
-        if (editMsg) editMsg.textContent = "Uploading photo...";
-        const file = photoInput.files[0];
-        // client-side checks
-        if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-          if (editMsg) editMsg.textContent = "Only PNG/JPEG/WebP images allowed.";
-          return;
-        }
-        if (file.size > 6 * 1024 * 1024) {
-          if (editMsg) editMsg.textContent = "Image too large (max 6MB).";
-          return;
-        }
-        uploadedUrl = await uploadProfileImage(file, currentUser.uid);
-      } catch (err) {
-        console.error("Image upload failed:", err);
-        if (editMsg) editMsg.textContent = "Image upload failed.";
+        uploadedUrl = await uploadProfileImage(file, state.currentUser.uid);
+        debugLog("Photo uploaded successfully", uploadedUrl);
+      } catch (uploadErr) {
+        debugError("Photo upload failed:", uploadErr);
+        showMessage(DOM.editMsg, `Photo upload failed: ${uploadErr.message}`, true);
         return;
       }
     }
 
-    // Save to Firestore + update Auth profile
-    try {
-      if (editMsg) editMsg.textContent = "Saving profile...";
-      const userRef = doc(db, "users", currentUser.uid);
-      const updatePayload = {
-        username: newUsername,
-        usernameLower: newUsername.toLowerCase(),
-        bio: newBio,
-        updatedAt: serverTimestamp()
-      };
-      if (uploadedUrl) updatePayload.photoURL = uploadedUrl;
-
-      await updateDoc(userRef, updatePayload);
-
-      // Update Firebase Auth profile (best-effort)
-      try {
-        await updateAuthProfile(currentUser, {
-          displayName: newUsername,
-          photoURL: uploadedUrl || currentUser.photoURL || null
-        });
-      } catch (authErr) {
-        console.warn("Failed to update Auth profile:", authErr);
-      }
-
-      if (editMsg) editMsg.textContent = "Saved.";
-      // Update topbar immediately
-      if (topbarName) topbarName.textContent = newUsername;
-      if (topbarAvatar) topbarAvatar.src = uploadedUrl || currentUser.photoURL || defaultAvatar();
-
-      // Re-render profile to reflect changes
-      await renderProfile(currentUser.uid);
-      if (photoInput) photoInput.value = "";
-    } catch (err) {
-      console.error("Failed to save profile:", err);
-      if (editMsg) editMsg.textContent = "Failed to save profile.";
+    // Save to Firestore
+    showMessage(DOM.editMsg, "Saving profile...", false);
+    
+    const userRef = doc(db, "users", state.currentUser.uid);
+    const updatePayload = {
+      username: newUsername,
+      usernameLower: newUsername.toLowerCase(),
+      bio: newBio,
+      updatedAt: serverTimestamp()
+    };
+    
+    if (uploadedUrl) {
+      updatePayload.photoURL = uploadedUrl;
     }
-  });
+
+    await updateDoc(userRef, updatePayload);
+
+    // Update Firebase Auth profile (best effort)
+    try {
+      const authUpdatePayload = { displayName: newUsername };
+      if (uploadedUrl) authUpdatePayload.photoURL = uploadedUrl;
+      
+      await updateAuthProfile(state.currentUser, authUpdatePayload);
+      debugLog("Auth profile updated successfully");
+    } catch (authErr) {
+      debugError("Failed to update Auth profile:", authErr);
+      // Don't fail the entire save for this
+    }
+
+    showMessage(DOM.editMsg, "Profile saved successfully!", false);
+    
+    // Clear file input
+    if (DOM.photoInput) DOM.photoInput.value = "";
+    
+    // Re-render profile
+    await renderProfile(state.currentUser.uid);
+    
+    debugLog("Profile save complete");
+
+  } catch (err) {
+    debugError("Save profile failed:", err);
+    showMessage(DOM.editMsg, `Failed to save profile: ${err.message}`, true);
+  } finally {
+    setLoading(false);
+  }
 }
 
-/* ---------- Helper: check existing pending friend request between two users ---------- */
+/* ===== Cancel Edit Handler ===== */
+function cancelEdit() {
+  if (!state.viewedProfileData) return;
+  
+  // Reset form to original values
+  if (DOM.editUsername) DOM.editUsername.value = state.viewedProfileData.username || "";
+  if (DOM.editBio) DOM.editBio.value = state.viewedProfileData.bio || "";
+  if (DOM.editAvatarPreview) DOM.editAvatarPreview.src = state.viewedProfileData.photoURL || defaultAvatar();
+  if (DOM.photoInput) DOM.photoInput.value = "";
+  
+  clearMessage(DOM.editMsg);
+  debugLog("Edit cancelled");
+}
+
+/* ===== Friend Request Management ===== */
 async function hasPendingRequestBetween(aUid, bUid) {
-  // Check both directions for a pending request
   try {
     const colRef = collection(db, "friendRequests");
-    const q1 = query(colRef, where("fromUid", "==", aUid), where("toUid", "==", bUid), where("status", "==", "pending"));
-    const q2 = query(colRef, where("fromUid", "==", bUid), where("toUid", "==", aUid), where("status", "==", "pending"));
-    const snap1 = await _getDocs(q1);
+    const queries = [
+      query(colRef, where("fromUid", "==", aUid), where("toUid", "==", bUid), where("status", "==", "pending")),
+      query(colRef, where("fromUid", "==", bUid), where("toUid", "==", aUid), where("status", "==", "pending"))
+    ];
+    
+    const [snap1, snap2] = await Promise.all(queries.map(q => getDocs(q)));
+    
     if (!snap1.empty) return { exists: true, doc: snap1.docs[0], direction: "outgoing" };
-    const snap2 = await _getDocs(q2);
     if (!snap2.empty) return { exists: true, doc: snap2.docs[0], direction: "incoming" };
+    
     return { exists: false };
   } catch (err) {
-    console.error("hasPendingRequestBetween error:", err);
+    debugError("hasPendingRequestBetween error:", err);
     return { exists: false, error: err };
   }
 }
 
-/* ---------- Visitor actions (send request / unfriend) ---------- */
-export async function setupVisitorActions(uid, profileData) {
-  // This function can be awaited (renderProfile calls it with await)
-  profileActions.innerHTML = "";
-
-  // Guard
-  if (!currentUser || !uid || uid === currentUser.uid) return;
-
-  // Load current user's doc to check current friendship
-  let myData = {};
-  try {
-    const mySnap = await getDoc(doc(db, "users", currentUser.uid));
-    myData = mySnap.exists() ? mySnap.data() : {};
-  } catch (err) {
-    console.error("Failed to load my user doc:", err);
-    myData = {};
+async function sendFriendRequest(uid) {
+  if (!state.currentUser) {
+    throw new Error("Not signed in");
+  }
+  
+  // Check for existing requests
+  const pending = await hasPendingRequestBetween(state.currentUser.uid, uid);
+  if (pending.exists) {
+    const message = pending.direction === "outgoing" 
+      ? "You already sent a friend request. Please wait for a response."
+      : "This user has already sent you a request. Check your incoming requests.";
+    throw new Error(message);
   }
 
-  const friendsArr = Array.isArray(myData.friends) ? myData.friends : [];
-  const isFriend = friendsArr.includes(uid);
+  // Send request
+  await addDoc(collection(db, "friendRequests"), {
+    fromUid: state.currentUser.uid,
+    toUid: uid,
+    status: "pending",
+    createdAt: serverTimestamp()
+  });
+  
+  debugLog(`Friend request sent to ${uid}`);
+}
 
-  if (isFriend) {
-    // Unfriend button
-    const unfriendBtn = document.createElement("button");
-    unfriendBtn.textContent = "Unfriend";
-    unfriendBtn.onclick = async () => {
-      try {
-        // remove target from my friends
-        await updateDoc(doc(db, "users", currentUser.uid), {
-          friends: friendsArr.filter(x => x !== uid)
-        });
-        // Try to remove me from their friends if permitted (best-effort)
-        try {
-          const theirSnap = await getDoc(doc(db, "users", uid));
-          if (theirSnap.exists()) {
-            const theirFriends = Array.isArray(theirSnap.data().friends) ? theirSnap.data().friends : [];
-            if (theirFriends.includes(currentUser.uid)) {
-              await updateDoc(doc(db, "users", uid), {
-                friends: theirFriends.filter(x => x !== currentUser.uid)
-              });
-            }
-          }
-        } catch (err) {
-          console.warn("Could not remove friendship from other user's doc (may be permission rules):", err);
-        }
-        alert("Removed from your friends list.");
-        await renderProfile(uid);
-      } catch (err) {
-        console.error("Unfriend failed:", err);
-        alert("Failed to unfriend. Check console.");
-      }
-    };
-    profileActions.appendChild(unfriendBtn);
+async function unfriendUser(uid) {
+  if (!state.currentUser) {
+    throw new Error("Not signed in");
+  }
+  
+  // Remove from current user's friends list
+  const myRef = doc(db, "users", state.currentUser.uid);
+  await updateDoc(myRef, {
+    friends: arrayRemove(uid),
+    updatedAt: serverTimestamp()
+  });
+  
+  // Try to remove from their friends list (best effort)
+  try {
+    const theirRef = doc(db, "users", uid);
+    await updateDoc(theirRef, {
+      friends: arrayRemove(state.currentUser.uid),
+      updatedAt: serverTimestamp()
+    });
+  } catch (err) {
+    debugError("Could not remove from other user's friends list:", err);
+    // This might fail due to permissions, but that's ok
+  }
+  
+  debugLog(`Unfriended user ${uid}`);
+}
+
+/* ===== Visitor Actions Setup ===== */
+async function setupVisitorActions(uid, profileData) {
+  if (!DOM.profileActions || !state.currentUser || uid === state.currentUser.uid) {
     return;
   }
 
-  // Not friends — show Add Friend (but prevent duplicate pending)
-  const addBtn = document.createElement("button");
-  addBtn.textContent = "Add Friend";
-  addBtn.onclick = async () => {
-    try {
-      if (!currentUser) return alert("Not signed in.");
-      // Prevent duplicate pending requests
-      const pending = await hasPendingRequestBetween(currentUser.uid, uid);
-      if (pending.exists) {
-        if (pending.direction === "outgoing") {
-          alert("You already sent a friend request. Please wait for a response.");
-        } else if (pending.direction === "incoming") {
-          alert("This user has already sent you a request — check incoming requests.");
-        } else {
-          alert("A pending friend request already exists.");
-        }
-        return;
-      }
-
-      await addDoc(collection(db, "friendRequests"), {
-        fromUid: currentUser.uid,
-        toUid: uid,
-        status: "pending",
-        createdAt: serverTimestamp()
-      });
-      alert("Friend request sent.");
-      await renderProfile(uid);
-    } catch (err) {
-      console.error("Send friend request failed:", err);
-      alert("Failed to send friend request. See console.");
-    }
-  };
-
-  profileActions.appendChild(addBtn);
-}
-
-/* ---------- Owner helper ---------- */
-export function setupOwnerActions() {
-  profileActions.innerHTML = "";
-  const info = document.createElement("div");
-  info.className = "small";
-  info.textContent = "This is your profile. Use the form below to update username, bio, and photo.";
-  profileActions.appendChild(info);
-}
-// profile.js — Part 3 (friend-request helpers, outgoing-listener, exports)
-
-/* ---------- Friend-request listeners & actions ---------- */
-
-/**
- * Listen for incoming friend requests for the current signed-in user.
- * @param {(requests: Array)} callback - invoked with an array of request objects { id, fromUid, toUid, status, createdAt, fromUser }
- * @returns {Function} unsubscribe function
- */
-export function listenForFriendRequests(callback) {
-  if (!currentUser) {
-    console.warn("listenForFriendRequests: no currentUser yet");
-    return () => {};
-  }
-
-  const q = query(
-    collection(db, "friendRequests"),
-    where("toUid", "==", currentUser.uid),
-    where("status", "==", "pending")
-  );
-
-  const unsubscribe = onSnapshot(q, async (snapshot) => {
-    try {
-      const requests = [];
-      for (const docSnap of snapshot.docs) {
-        const req = docSnap.data();
-        // include a light profile of the sender to show in UI
-        let fromUser = null;
-        try {
-          const fromSnap = await getDoc(doc(db, "users", req.fromUid));
-          if (fromSnap.exists()) fromUser = fromSnap.data();
-        } catch (err) {
-          console.warn("Could not load fromUser profile:", err);
-        }
-
-        requests.push({
-          id: docSnap.id,
-          ...req,
-          fromUser
-        });
-      }
-      callback(requests);
-    } catch (err) {
-      console.error("listenForFriendRequests handler error:", err);
-      callback([]);
-    }
-  }, (err) => {
-    console.error("listenForFriendRequests onSnapshot error:", err);
-    callback([]);
-  });
-
-  // return unsubscribe to caller for cleanup
-  return unsubscribe;
-}
-
-/**
- * Accept a friend request.
- * - Marks the friendRequest doc as 'accepted'
- * - Adds requester uid to the current user's friends array (client-side update)
- * - DOES NOT update the other user's doc (sender) — instead the sender's client will detect the status change and update their own doc via startOutgoingRequestsListener.
- *
- * @param {string} requestId - the friendRequests doc id
- * @param {string} fromUid - uid of the user who sent the request
- */
-export async function acceptFriendRequest(requestId, fromUid) {
-  if (!currentUser) throw new Error("Not signed in");
-
+  DOM.profileActions.innerHTML = "";
+  
   try {
-    // 1) mark the request accepted
-    await updateDoc(doc(db, "friendRequests", requestId), {
-      status: "accepted",
-      respondedAt: serverTimestamp()
-    });
+    // Check current friendship status
+    const myRef = doc(db, "users", state.currentUser.uid);
+    const mySnap = await getDoc(myRef);
+    const myData = mySnap.exists() ? mySnap.data() : {};
+    const friendsArr = Array.isArray(myData.friends) ? myData.friends : [];
+    const isFriend = friendsArr.includes(uid);
 
-    // 2) add them to *this* user's friends array (acceptor)
-    try {
-      const myRef = doc(db, "users", currentUser.uid);
-      const mySnap = await getDoc(myRef);
-      const myFriends = mySnap.exists() ? (mySnap.data().friends || []) : [];
-      if (!myFriends.includes(fromUid)) {
-        // create a deduplicated array and write
-        await updateDoc(myRef, {
-          friends: Array.from(new Set([...myFriends, fromUid])),
-          updatedAt: serverTimestamp()
-        });
-      }
-    } catch (err) {
-      // If this fails (shouldn't for user's own doc), log and continue
-      console.error("Failed to add friend to acceptor's doc:", err);
-      // Do not throw — request already accepted in Firestore
-    }
-
-    // success
-    return { ok: true };
-  } catch (err) {
-    console.error("acceptFriendRequest error:", err);
-    throw err;
-  }
-}
-
-/**
- * Decline a friend request by id.
- * @param {string} requestId
- */
-export async function declineFriendRequest(requestId) {
-  if (!currentUser) throw new Error("Not signed in");
-  try {
-    await updateDoc(doc(db, "friendRequests", requestId), {
-      status: "declined",
-      respondedAt: serverTimestamp()
-    });
-    return { ok: true };
-  } catch (err) {
-    console.error("declineFriendRequest error:", err);
-    throw err;
-  }
-}
-
-/* ---------- Outgoing requests listener ----------
-   Ensures the sender updates their own friends array when their outgoing request is accepted.
-   This avoids needing the acceptor to write to the sender's users/{uid} (which often triggers permission issues).
-   Call this on sign-in (script.js should start it alongside incoming listener).
-*/
-export function startOutgoingRequestsListener() {
-  if (!currentUser) {
-    console.warn("startOutgoingRequestsListener: no currentUser yet");
-    return () => {};
-  }
-
-  const q = query(
-    collection(db, "friendRequests"),
-    where("fromUid", "==", currentUser.uid),
-    where("status", "==", "accepted")
-  );
-
-  const unsubscribe = onSnapshot(q, async (snapshot) => {
-    try {
-      if (snapshot.empty) return;
-      // For each accepted outgoing request, ensure this user's friends list contains the toUid
-      for (const docSnap of snapshot.docs) {
-        const req = docSnap.data();
-        const toUid = req.toUid;
-        if (!toUid) continue;
-
-        try {
-          const myRef = doc(db, "users", currentUser.uid);
-          const mySnap = await getDoc(myRef);
-          const myFriends = mySnap.exists() ? (mySnap.data().friends || []) : [];
-          if (!myFriends.includes(toUid)) {
-            await updateDoc(myRef, {
-              friends: Array.from(new Set([...myFriends, toUid])),
-              updatedAt: serverTimestamp()
-            });
+    if (isFriend) {
+      // Show unfriend button
+      const unfriendBtn = document.createElement("button");
+      unfriendBtn.textContent = "Unfriend";
+      unfriendBtn.className = "btn-secondary";
+      unfriendBtn.onclick = async () => {
+        if (confirm("Are you sure you want to unfriend this user?")) {
+          try {
+            await unfriendUser(uid);
+            showMessage(DOM.editMsg, "User removed from friends list", false);
+            await renderProfile(uid);
+          } catch (err) {
+            debugError("Unfriend failed:", err);
+            showMessage(DOM.editMsg, `Failed to unfriend: ${err.message}`, true);
           }
-        } catch (err) {
-          console.error("startOutgoingRequestsListener: failed to update my friends array:", err);
         }
-      }
-    } catch (err) {
-      console.error("startOutgoingRequestsListener snapshot handler error:", err);
+      };
+      DOM.profileActions.appendChild(unfriendBtn);
+    } else {
+      // Show add friend button
+      const addBtn = document.createElement("button");
+      addBtn.textContent = "Add Friend";
+      addBtn.className = "btn-primary";
+      addBtn.onclick = async () => {
+        try {
+          await sendFriendRequest(uid);
+          showMessage(DOM.editMsg, "Friend request sent!", false);
+          await renderProfile(uid);
+        } catch (err) {
+          debugError("Send friend request failed:", err);
+          showMessage(DOM.editMsg, err.message, true);
+        }
+      };
+      DOM.profileActions.appendChild(addBtn);
     }
-  }, (err) => {
-    console.error("startOutgoingRequestsListener onSnapshot error:", err);
-  });
-
-  return unsubscribe;
-}
-
-/* ---------- Fetch friends helper (returns array of profile objects) ---------- */
-/**
- * Fetch the current user's friends' profiles and pass them to callback.
- * @param {(friendProfiles:Array) => void} callback
- */
-export async function fetchFriends(callback) {
-  if (!currentUser) {
-    callback([]);
-    return;
-  }
-
-  try {
-    const userSnap = await getDoc(doc(db, "users", currentUser.uid));
-    if (!userSnap.exists()) {
-      callback([]);
-      return;
-    }
-
-    const friends = Array.isArray(userSnap.data().friends) ? userSnap.data().friends : [];
-    if (!friends.length) {
-      callback([]);
-      return;
-    }
-
-    const friendProfiles = [];
-    for (const uid of friends) {
-      try {
-        const fSnap = await getDoc(doc(db, "users", uid));
-        if (fSnap.exists()) friendProfiles.push({ uid, ...fSnap.data() });
-      } catch (err) {
-        console.warn("fetchFriends: failed to load friend profile", uid, err);
-      }
-    }
-
-    callback(friendProfiles);
   } catch (err) {
-    console.error("fetchFriends error:", err);
-    callback([]);
+    debugError("setupVisitorActions error:", err);
+    DOM.profileActions.innerHTML = `<p class="error">Failed to load user actions</p>`;
   }
 }
 
-/* ---------- Utility: return current user ---------- */
-export function getCurrentUser() {
-  return currentUser;
+/* ===== Event Listeners Setup ===== */
+function setupEventListeners() {
+  debugLog("Setting up event listeners");
+  
+  // Photo preview
+  setupPhotoPreview();
+  
+  // Save button
+  if (DOM.saveProfileBtn) {
+    DOM.saveProfileBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      await saveProfile();
+    });
+  }
+  
+  // Cancel button
+  if (DOM.cancelEditBtn) {
+    DOM.cancelEditBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      cancelEdit();
+    });
+  }
+  
+  // Form validation on input
+  if (DOM.editUsername) {
+    DOM.editUsername.addEventListener("blur", () => {
+      const validation = validateUsername(DOM.editUsername.value);
+      if (!validation.valid) {
+        showMessage(DOM.editMsg, validation.message, true, 0);
+      } else {
+        clearMessage(DOM.editMsg);
+      }
+    });
+  }
+  
+  if (DOM.editBio) {
+    DOM.editBio.addEventListener("input", () => {
+      const remaining = 500 - DOM.editBio.value.length;
+      const counter = document.getElementById("bioCounter");
+      if (counter) {
+        counter.textContent = `${remaining} characters remaining`;
+        counter.style.color = remaining < 50 ? "#e74c3c" : "#666";
+      }
+    });
+  }
 }
 
-/* ---------- Export notes ----------
- - listenForFriendRequests(callback) -> returns unsubscribe()
- - startOutgoingRequestsListener() -> returns unsubscribe()
- - acceptFriendRequest(requestId, fromUid)
- - declineFriendRequest(requestId)
- - fetchFriends(callback)
- - getCurrentUser()
- 
- Usage tips:
-  - Have script.js call startOutgoingRequestsListener() after signing in (so the sender will add friends to their own doc automatically).
-  - When accepting, call acceptFriendRequest(requestId, fromUid) instead of attempting to write to the other user's doc directly.
-  - All returned unsubscribes should be called during cleanup (e.g., on logout) to avoid memory leaks.
-*/
+/* ===== Cleanup Function ===== */
+function cleanup() {
+  debugLog("Cleaning up listeners and state");
+  
+  state.unsubscribes.forEach(unsubscribe => {
+    try {
+      unsubscribe();
+    } catch (err) {
+      debugError("Error during cleanup:", err);
+    }
+  });
+  
+  state.unsubscribes = [];
+  state.currentUser = null;
+  state.viewedUid = null;
+  state.viewedProfileData = null;
+}
 
-/* ---------- End of Part 3 ---------- */
+/* ===== Auth State Management ===== */
+function initAuthListener() {
+  debugLog("Initializing auth listener");
+  
+  onAuthStateChanged(auth, async (user) => {
+    debugLog("Auth state changed", user ? { uid: user.uid, email: user.email } : "null");
+    
+    if (!user) {
+      debugLog("No user, redirecting to auth page");
+      cleanup();
+      window.location.replace("auth.html");
+      return;
+    }
+
+    try {
+      state.currentUser = user;
+      const profileUid = getQueryParam("uid");
+      const targetUid = profileUid || user.uid;
+      
+      debugLog(`Initializing profile page for user ${targetUid}`);
+      
+      await ensureUserDocExists(user);
+      await renderProfile(targetUid);
+      
+      debugLog("Profile initialization complete");
+    } catch (err) {
+      debugError("Auth initialization error:", err);
+      showMessage(DOM.editMsg, `Failed to initialize profile: ${err.message}`, true);
+    }
+  });
+}
+
+/* ===== Initialization ===== */
+document.addEventListener("DOMContentLoaded", () => {
+  debugLog("Profile page DOM loaded");
+  
+  // Check if required elements exist
+  const requiredElements = ['profileAvatar', 'profileUsername'];
+  const missing = requiredElements.filter(id => !document.getElementById(id));
+  
+  if (missing.length > 0) {
+    debugError(`Missing required DOM elements: ${missing.join(', ')}`);
+  }
+  
+  setupEventListeners();
+  initAuthListener();
+  
+  debugLog("Profile page initialization complete");
+});
+
+/* ===== Cleanup on page unload ===== */
+window.addEventListener("beforeunload", cleanup);
+
+/* ===== Export functions for external use ===== */
+export {
+  initAuthListener,
+  renderProfile,
+  ensureUserDocExists,
+  sendFriendRequest,
+  unfriendUser,
+  getCurrentUser: () => state.currentUser
+};
+
+debugLog("Profile.js module loaded successfully");
