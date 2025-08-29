@@ -1,4 +1,4 @@
-// profile.js - Fixed version with proper permissions and Cloudinary integration
+// profile.js - Fixed version that skips user document creation and focuses on existing profiles
 import { auth, db } from "./firebase.js";
 import { uploadProfileImage } from "./cloudinary.js";
 import {
@@ -10,11 +10,9 @@ import {
   query,
   where,
   serverTimestamp,
-  setDoc,
   getDocs,
   arrayUnion,
-  arrayRemove,
-  onSnapshot
+  arrayRemove
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import { 
   onAuthStateChanged, 
@@ -36,7 +34,7 @@ const profileState = {
   viewedUid: null,
   viewedProfileData: null,
   isLoading: false,
-  unsubscribes: []
+  initialized: false
 };
 
 // Utility functions
@@ -82,8 +80,8 @@ function setLoading(isLoading) {
     loadingIndicator.style.display = isLoading ? 'block' : 'none';
   }
   
-  // Disable/enable form elements
-  const buttons = document.querySelectorAll('button');
+  // Disable/enable interactive elements
+  const buttons = document.querySelectorAll('button:not([data-always-enabled])');
   const inputs = document.querySelectorAll('input, textarea');
   
   buttons.forEach(btn => {
@@ -131,63 +129,7 @@ function validateBio(bio) {
   return { valid: true };
 }
 
-// Fixed user document creation with proper error handling
-async function ensureUserDocExists(user) {
-  if (!user || !user.uid) {
-    throw new Error("Invalid user object");
-  }
-  
-  debugLog(`Checking if user document exists for ${user.uid}`);
-  
-  try {
-    const userRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userRef);
-    
-    if (userSnap.exists()) {
-      debugLog("User document already exists");
-      return;
-    }
-    
-    debugLog("User document doesn't exist, attempting to create...");
-    
-    // Try to create user document with minimal required fields
-    const defaultUsername = user.email ? user.email.split("@")[0] : `User${Date.now()}`;
-    const userData = {
-      username: defaultUsername,
-      usernameLower: defaultUsername.toLowerCase(),
-      bio: "",
-      photoURL: user.photoURL || "",
-      friends: [],
-      email: user.email || "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    };
-    
-    // Use setDoc with merge option to handle potential permission issues
-    await setDoc(userRef, userData, { merge: true });
-    debugLog("User document created successfully");
-    
-  } catch (error) {
-    debugError("ensureUserDocExists failed:", error);
-    
-    // If setDoc fails, the user might already exist or there are permission issues
-    // Let's try to read it again and if it still doesn't exist, that's a real problem
-    try {
-      const userRef = doc(db, "users", user.uid);
-      const retrySnap = await getDoc(userRef);
-      if (retrySnap.exists()) {
-        debugLog("User document exists after retry - continuing");
-        return;
-      }
-    } catch (retryError) {
-      debugError("Retry check also failed:", retryError);
-    }
-    
-    // If we get here, there's a real permission or configuration problem
-    throw new Error(`Cannot access user profile. This might be a Firestore permission issue. Original error: ${error.message}`);
-  }
-}
-
+// Load user profile from Firestore or create from auth data
 async function loadUserProfile(uid) {
   if (!uid) {
     throw new Error("No user ID provided");
@@ -199,20 +141,38 @@ async function loadUserProfile(uid) {
     const userRef = doc(db, "users", uid);
     const userSnap = await getDoc(userRef);
     
-    if (!userSnap.exists()) {
-      debugError(`Profile not found for user: ${uid}`);
-      return null;
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      debugLog("Profile loaded from Firestore:", userData);
+      return userData;
+    } else {
+      // Profile doesn't exist in Firestore, create basic profile from auth data
+      debugLog(`No Firestore profile found for ${uid}, creating from auth data`);
+      
+      if (uid === profileState.currentUser?.uid) {
+        // For current user, create from their auth data
+        const user = profileState.currentUser;
+        const basicProfile = {
+          username: user.displayName || (user.email ? user.email.split("@")[0] : "User"),
+          usernameLower: (user.displayName || (user.email ? user.email.split("@")[0] : "User")).toLowerCase(),
+          bio: "",
+          photoURL: user.photoURL || "",
+          email: user.email || "",
+          friends: [],
+          isBasicProfile: true // Flag to indicate this is a temporary profile
+        };
+        debugLog("Created basic profile from auth:", basicProfile);
+        return basicProfile;
+      } else {
+        // For other users, return null if no profile exists
+        return null;
+      }
     }
-    
-    const userData = userSnap.data();
-    debugLog("Profile loaded successfully", userData);
-    return userData;
   } catch (error) {
     debugError("loadUserProfile failed:", error);
     
-    // Provide more specific error handling
     if (error.code === 'permission-denied') {
-      throw new Error(`Permission denied reading profile for user ${uid}. Check Firestore rules.`);
+      throw new Error(`Permission denied reading profile for user ${uid}`);
     }
     
     throw new Error(`Failed to load profile: ${error.message}`);
@@ -224,7 +184,8 @@ function updateProfileDisplay(userData, isOwnProfile = false) {
   // Update avatar
   const profileAvatar = document.getElementById('profileAvatar');
   if (profileAvatar) {
-    profileAvatar.src = userData.photoURL || defaultAvatar();
+    const avatarUrl = userData.photoURL || defaultAvatar();
+    profileAvatar.src = avatarUrl;
     profileAvatar.onerror = function() {
       this.src = defaultAvatar();
     };
@@ -243,30 +204,36 @@ function updateProfileDisplay(userData, isOwnProfile = false) {
       profileEmail.textContent = userData.email || profileState.currentUser?.email || "";
     } else {
       profileEmail.textContent = "";
+      profileEmail.style.display = "none";
     }
   }
   
   // Update bio
   const profileBio = document.getElementById('profileBio');
   if (profileBio) {
-    profileBio.textContent = userData.bio || "No bio provided.";
+    profileBio.textContent = userData.bio || (isOwnProfile ? "Click edit to add a bio" : "No bio provided");
   }
   
   // Update topbar if viewing own profile
   if (isOwnProfile) {
-    const topbarName = document.getElementById('meName');
-    const topbarAvatar = document.getElementById('meAvatarSmall');
-    
-    if (topbarName) {
-      topbarName.textContent = userData.username || "You";
-    }
-    
-    if (topbarAvatar) {
-      topbarAvatar.src = userData.photoURL || defaultAvatar();
-      topbarAvatar.onerror = function() {
-        this.src = defaultAvatar();
-      };
-    }
+    updateTopbar(userData);
+  }
+}
+
+function updateTopbar(userData) {
+  const topbarName = document.getElementById('meName');
+  const topbarAvatar = document.getElementById('meAvatarSmall');
+  
+  if (topbarName) {
+    topbarName.textContent = userData.username || "You";
+  }
+  
+  if (topbarAvatar) {
+    const avatarUrl = userData.photoURL || defaultAvatar();
+    topbarAvatar.src = avatarUrl;
+    topbarAvatar.onerror = function() {
+      this.src = defaultAvatar();
+    };
   }
 }
 
@@ -285,13 +252,14 @@ function showEditArea(userData) {
   if (editBio) editBio.value = userData.bio || "";
   
   if (editAvatarPreview) {
-    editAvatarPreview.src = userData.photoURL || defaultAvatar();
+    const avatarUrl = userData.photoURL || defaultAvatar();
+    editAvatarPreview.src = avatarUrl;
     editAvatarPreview.onerror = function() {
       this.src = defaultAvatar();
     };
   }
   
-  setupOwnerActions();
+  setupOwnerActions(userData);
 }
 
 function hideEditArea() {
@@ -301,41 +269,55 @@ function hideEditArea() {
   }
 }
 
-function setupOwnerActions() {
+function setupOwnerActions(userData) {
   const profileActions = document.getElementById('profile-actions');
   if (!profileActions) return;
   
-  profileActions.innerHTML = `
-    <div class="owner-info">
-      <p class="info-text">This is your profile. Use the form below to update your information.</p>
-    </div>
-  `;
+  let actionHtml = '';
+  
+  if (userData.isBasicProfile) {
+    actionHtml = `
+      <div class="owner-info">
+        <p class="info-text">Welcome! Complete your profile by adding a username and bio below.</p>
+      </div>
+    `;
+  } else {
+    actionHtml = `
+      <div class="owner-info">
+        <p class="info-text">This is your profile. Use the form below to update your information.</p>
+      </div>
+    `;
+  }
+  
+  profileActions.innerHTML = actionHtml;
 }
 
 function showProfileNotFound() {
   debugLog("Showing profile not found state");
   
-  updateProfileDisplay({
-    username: "Profile Not Found",
-    bio: "This user does not exist or their profile is not available.",
-    photoURL: "",
-    email: ""
-  }, false);
-  
+  const profileUsername = document.getElementById('profileUsername');
+  const profileBio = document.getElementById('profileBio');
+  const profileAvatar = document.getElementById('profileAvatar');
+  const profileEmail = document.getElementById('profileEmail');
   const profileActions = document.getElementById('profile-actions');
-  if (profileActions) {
-    profileActions.innerHTML = "";
+  
+  if (profileUsername) profileUsername.textContent = "Profile Not Found";
+  if (profileBio) profileBio.textContent = "This user does not exist or their profile is not available.";
+  if (profileAvatar) profileAvatar.src = defaultAvatar();
+  if (profileEmail) {
+    profileEmail.textContent = "";
+    profileEmail.style.display = "none";
   }
+  if (profileActions) profileActions.innerHTML = "";
   
   hideEditArea();
 }
 
-// Friend request functions
+// Friend management functions
 async function checkPendingRequests(fromUid, toUid) {
   try {
     const requestsRef = collection(db, "friendRequests");
     
-    // Check both directions
     const outgoingQuery = query(requestsRef, 
       where("fromUid", "==", fromUid), 
       where("toUid", "==", toUid), 
@@ -375,7 +357,6 @@ async function sendFriendRequest(toUid) {
   
   const fromUid = profileState.currentUser.uid;
   
-  // Check for existing requests
   const pendingCheck = await checkPendingRequests(fromUid, toUid);
   
   if (pendingCheck.exists) {
@@ -385,7 +366,6 @@ async function sendFriendRequest(toUid) {
     throw new Error(message);
   }
   
-  // Create friend request
   const requestData = {
     fromUid: fromUid,
     toUid: toUid,
@@ -404,14 +384,12 @@ async function removeFriend(friendUid) {
   
   const currentUid = profileState.currentUser.uid;
   
-  // Remove from current user's friends
   const currentUserRef = doc(db, "users", currentUid);
   await updateDoc(currentUserRef, {
     friends: arrayRemove(friendUid),
     updatedAt: serverTimestamp()
   });
   
-  // Try to remove from friend's list (best effort)
   try {
     const friendRef = doc(db, "users", friendUid);
     await updateDoc(friendRef, {
@@ -419,7 +397,7 @@ async function removeFriend(friendUid) {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    debugError("Could not update friend's list (this is expected with some permission setups):", error);
+    debugError("Could not update friend's list:", error);
   }
   
   debugLog(`Removed friendship between ${currentUid} and ${friendUid}`);
@@ -434,15 +412,19 @@ async function setupVisitorActions(targetUid, userData) {
   profileActions.innerHTML = "";
   
   try {
-    // Check if already friends
-    const currentUserRef = doc(db, "users", profileState.currentUser.uid);
-    const currentUserSnap = await getDoc(currentUserRef);
-    const currentUserData = currentUserSnap.exists() ? currentUserSnap.data() : {};
-    const friends = Array.isArray(currentUserData.friends) ? currentUserData.friends : [];
+    let friends = [];
+    try {
+      const currentUserRef = doc(db, "users", profileState.currentUser.uid);
+      const currentUserSnap = await getDoc(currentUserRef);
+      const currentUserData = currentUserSnap.exists() ? currentUserSnap.data() : {};
+      friends = Array.isArray(currentUserData.friends) ? currentUserData.friends : [];
+    } catch (error) {
+      debugError("Could not load current user's friends:", error);
+    }
+    
     const isFriend = friends.includes(targetUid);
     
     if (isFriend) {
-      // Show unfriend button
       const unfriendBtn = document.createElement('button');
       unfriendBtn.textContent = 'Unfriend';
       unfriendBtn.className = 'btn-danger';
@@ -450,31 +432,36 @@ async function setupVisitorActions(targetUid, userData) {
       unfriendBtn.addEventListener('click', async function() {
         if (confirm('Are you sure you want to unfriend this user?')) {
           try {
+            setLoading(true);
             await removeFriend(targetUid);
             showMessage('User removed from friends list', false);
             await renderProfile(targetUid);
           } catch (error) {
             debugError("Unfriend failed:", error);
             showMessage(`Failed to unfriend: ${error.message}`, true);
+          } finally {
+            setLoading(false);
           }
         }
       });
       
       profileActions.appendChild(unfriendBtn);
     } else {
-      // Show add friend button
       const addFriendBtn = document.createElement('button');
       addFriendBtn.textContent = 'Add Friend';
       addFriendBtn.className = 'btn-primary';
       
       addFriendBtn.addEventListener('click', async function() {
         try {
+          setLoading(true);
           await sendFriendRequest(targetUid);
           showMessage('Friend request sent!', false);
           await renderProfile(targetUid);
         } catch (error) {
           debugError("Send friend request failed:", error);
           showMessage(error.message, true);
+        } finally {
+          setLoading(false);
         }
       });
       
@@ -532,7 +519,50 @@ async function renderProfile(uid) {
   }
 }
 
-// Enhanced profile saving with proper Cloudinary integration
+// Create or update profile in Firestore
+async function createOrUpdateProfile(userData) {
+  if (!profileState.currentUser) {
+    throw new Error("Not signed in");
+  }
+  
+  const userRef = doc(db, "users", profileState.currentUser.uid);
+  
+  // Check if profile exists
+  try {
+    const existingSnap = await getDoc(userRef);
+    if (existingSnap.exists()) {
+      // Profile exists, update it
+      debugLog("Updating existing profile");
+      await updateDoc(userRef, {
+        ...userData,
+        updatedAt: serverTimestamp()
+      });
+    } else {
+      // Profile doesn't exist, create it with setDoc
+      debugLog("Creating new profile with setDoc");
+      await updateDoc(userRef, {
+        ...userData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+  } catch (error) {
+    if (error.code === 'not-found') {
+      // Document doesn't exist, we need to create it
+      // This should work with your Firestore rules
+      debugLog("Document not found, creating with updateDoc should create it");
+      await updateDoc(userRef, {
+        ...userData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    } else {
+      throw error;
+    }
+  }
+}
+
+// Profile saving
 async function saveProfile() {
   if (!profileState.currentUser) {
     showMessage("Not signed in", true);
@@ -564,11 +594,11 @@ async function saveProfile() {
   }
   
   setLoading(true);
-  showMessage("Saving profile...", false);
   
   try {
     // Check username uniqueness (skip if unchanged)
-    if (newUsername.toLowerCase() !== profileState.viewedProfileData?.usernameLower) {
+    const currentUsername = profileState.viewedProfileData?.usernameLower;
+    if (newUsername.toLowerCase() !== currentUsername) {
       showMessage("Checking username availability...", false);
       
       const usersRef = collection(db, "users");
@@ -583,8 +613,8 @@ async function saveProfile() {
       }
     }
     
-    // Handle photo upload with Cloudinary
-    let uploadedPhotoURL = null;
+    // Handle photo upload
+    let uploadedPhotoURL = profileState.viewedProfileData?.photoURL || null;
     if (photoInput?.files?.length > 0) {
       showMessage("Uploading photo to Cloudinary...", false);
       
@@ -597,65 +627,48 @@ async function saveProfile() {
         return;
       }
       
-      // Check file size (5MB limit)
-      const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+      const maxSize = 5 * 1024 * 1024;
       if (file.size > maxSize) {
         showMessage("Image must be smaller than 5MB", true);
         return;
       }
       
       try {
-        debugLog("Starting Cloudinary upload...", {
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type
-        });
-        
-        // Use the uploadProfileImage function from cloudinary.js
+        debugLog("Starting Cloudinary upload...");
         uploadedPhotoURL = await uploadProfileImage(file, profileState.currentUser.uid);
-        
         debugLog("Cloudinary upload successful:", uploadedPhotoURL);
         showMessage("Photo uploaded successfully, saving profile...", false);
-        
       } catch (uploadError) {
         debugError("Cloudinary upload failed:", uploadError);
-        
-        // Provide specific error messages based on the error
         let errorMessage = "Photo upload failed: ";
         if (uploadError.message.includes('network')) {
           errorMessage += "Network error. Please check your connection and try again.";
-        } else if (uploadError.message.includes('size')) {
-          errorMessage += "File is too large. Please use a smaller image.";
-        } else if (uploadError.message.includes('format')) {
-          errorMessage += "Unsupported file format. Please use PNG, JPEG, WebP, or GIF.";
         } else {
           errorMessage += uploadError.message;
         }
-        
         showMessage(errorMessage, true);
         return;
       }
     }
     
-    // Save to Firestore
-    showMessage("Updating profile...", false);
+    // Prepare profile data
+    showMessage("Saving profile...", false);
     
-    const userRef = doc(db, "users", profileState.currentUser.uid);
-    const updateData = {
+    const profileData = {
       username: newUsername,
       usernameLower: newUsername.toLowerCase(),
       bio: newBio,
-      updatedAt: serverTimestamp()
+      photoURL: uploadedPhotoURL || "",
+      email: profileState.currentUser.email || "",
+      friends: profileState.viewedProfileData?.friends || []
     };
     
-    if (uploadedPhotoURL) {
-      updateData.photoURL = uploadedPhotoURL;
-    }
+    debugLog("Saving profile data:", profileData);
     
-    debugLog("Saving profile data to Firestore:", updateData);
-    await updateDoc(userRef, updateData);
+    // Save to Firestore
+    await createOrUpdateProfile(profileData);
     
-    // Update Firebase Auth profile (best effort)
+    // Update Firebase Auth profile
     try {
       const authUpdateData = { displayName: newUsername };
       if (uploadedPhotoURL) {
@@ -680,10 +693,9 @@ async function saveProfile() {
   } catch (error) {
     debugError("saveProfile failed:", error);
     
-    // Provide more specific error messages
     let errorMessage = "Failed to save profile: ";
     if (error.code === 'permission-denied') {
-      errorMessage += "Permission denied. You may not have permission to update this profile.";
+      errorMessage += "Permission denied. Check your Firestore security rules.";
     } else if (error.code === 'network-request-failed') {
       errorMessage += "Network error. Please check your connection and try again.";
     } else {
@@ -707,7 +719,10 @@ function cancelEdit() {
   // Reset form to original values
   if (editUsername) editUsername.value = profileState.viewedProfileData.username || "";
   if (editBio) editBio.value = profileState.viewedProfileData.bio || "";
-  if (editAvatarPreview) editAvatarPreview.src = profileState.viewedProfileData.photoURL || defaultAvatar();
+  if (editAvatarPreview) {
+    const avatarUrl = profileState.viewedProfileData.photoURL || defaultAvatar();
+    editAvatarPreview.src = avatarUrl;
+  }
   if (photoInput) photoInput.value = "";
   
   clearMessage();
@@ -751,7 +766,6 @@ function setupEventListeners() {
           URL.revokeObjectURL(objectURL);
         };
         clearMessage();
-        debugLog("Photo preview loaded successfully");
       } catch (error) {
         debugError("Photo preview failed:", error);
         showMessage("Failed to preview image", true);
@@ -777,19 +791,19 @@ function setupEventListeners() {
     });
   }
   
-  // Username validation on blur
+  // Username validation
   const editUsername = document.getElementById('editUsername');
   if (editUsername) {
     editUsername.addEventListener('blur', function() {
-      const validation = validateUsername(this.value);
-      if (this.value && !validation.valid) {
-        showMessage(validation.message, true, 0);
+      if (this.value) {
+        const validation = validateUsername(this.value);
+        if (!validation.valid) {
+          showMessage(validation.message, true, 0);
+        }
       }
     });
     
-    editUsername.addEventListener('focus', function() {
-      clearMessage();
-    });
+    editUsername.addEventListener('focus', clearMessage);
   }
   
   // Bio character counter
@@ -804,25 +818,7 @@ function setupEventListeners() {
   }
 }
 
-// Cleanup function
-function cleanup() {
-  debugLog("Cleaning up profile state and listeners");
-  
-  profileState.unsubscribes.forEach(unsubscribe => {
-    try {
-      unsubscribe();
-    } catch (error) {
-      debugError("Error during cleanup:", error);
-    }
-  });
-  
-  profileState.unsubscribes = [];
-  profileState.currentUser = null;
-  profileState.viewedUid = null;
-  profileState.viewedProfileData = null;
-}
-
-// Fixed auth state handler with better error handling
+// Auth state handler
 function initAuth() {
   debugLog("Initializing auth listener");
   
@@ -831,31 +827,17 @@ function initAuth() {
     
     if (!user) {
       debugLog("No user - redirecting to auth page");
-      cleanup();
       window.location.replace("auth.html");
       return;
     }
     
-    try {
-      profileState.currentUser = user;
-      
-      // Try to ensure user document exists, but don't fail if it doesn't work
-      try {
-        await ensureUserDocExists(user);
-      } catch (userDocError) {
-        debugError("Could not create user document, but continuing:", userDocError);
-        // Continue anyway - the user might already exist or we might still be able to read their profile
-      }
-      
-      const targetUid = getQueryParam("uid") || user.uid;
-      debugLog(`Rendering profile for target UID: ${targetUid}`);
-      
-      await renderProfile(targetUid);
-      
-    } catch (error) {
-      debugError("Auth initialization failed:", error);
-      showMessage(`Failed to initialize profile: ${error.message}`, true);
-    }
+    profileState.currentUser = user;
+    profileState.initialized = true;
+    
+    const targetUid = getQueryParam("uid") || user.uid;
+    debugLog(`Rendering profile for target UID: ${targetUid}`);
+    
+    await renderProfile(targetUid);
   });
 }
 
@@ -863,17 +845,10 @@ function initAuth() {
 document.addEventListener('DOMContentLoaded', function() {
   debugLog("Profile page DOM loaded");
   
-  // Check required elements
-  const requiredElements = ['profileAvatar', 'profileUsername', 'profile-actions'];
-  const missingElements = requiredElements.filter(id => !document.getElementById(id));
-  
-  if (missingElements.length > 0) {
-    debugError(`Missing required DOM elements: ${missingElements.join(', ')}`);
-  }
-  
   // Check if Cloudinary module is available
   if (typeof uploadProfileImage === 'undefined') {
     debugError("uploadProfileImage function not found - check cloudinary.js import");
+    showMessage("Photo upload functionality not available", true);
   } else {
     debugLog("Cloudinary upload function is available");
   }
@@ -884,9 +859,6 @@ document.addEventListener('DOMContentLoaded', function() {
   debugLog("Profile page initialization complete");
 });
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', cleanup);
-
 // Global error handlers
 window.addEventListener('error', function(event) {
   debugError("Global error:", event.error);
@@ -896,7 +868,7 @@ window.addEventListener('unhandledrejection', function(event) {
   debugError("Unhandled promise rejection:", event.reason);
 });
 
-// Export functions for external use
+// Export functions
 export {
   renderProfile,
   saveProfile,
