@@ -371,121 +371,96 @@ function setupAuthButtons() {
   }
 }
 
-/**
- * Creates an HTML element for a single chat message.
- * @param {object} messageData - The message data from Firestore.
- * @returns {HTMLElement | null} The message element or null if template is missing.
- */
-function createMessageElement(messageData) {
-  const { senderId, senderName, senderPhotoURL, text, timestamp } = messageData;
-  if (!domElements.chatMessageTemplate) return null;
-
-  const profile = profileCache[senderId] || { username: senderName, photoURL: senderPhotoURL };
-  const name = profile.username || "Unknown";
-  const avatar = profile.photoURL || defaultAvatar();
-  const timeStr = timestamp?.toDate ? new Date(timestamp.toDate()).toLocaleString() : "";
-
-  const clone = domElements.chatMessageTemplate.content.cloneNode(true);
-  const msgElement = clone.querySelector(".chat-message"); // Main container
-  const imgEl = clone.querySelector("img.avatar");
-  const senderNameEl = clone.querySelector(".sender-name");
-  const timeEl = clone.querySelector(".time");
-  const textEl = clone.querySelector(".message-text");
-
-  if (msgElement) msgElement.setAttribute("data-uid", senderId || "");
-  if (imgEl) imgEl.src = avatar;
-  if (senderNameEl) senderNameEl.textContent = name;
-  if (timeEl) timeEl.textContent = timeStr;
-  if (textEl) textEl.innerHTML = escapeHtml(text || "");
-
-  const wrapper = document.createElement("div");
-  wrapper.appendChild(clone);
-  return wrapper.firstElementChild;
-}
-
 /* ===== Chat Listener & Send ===== */
 function startChatListener(user) {
   if (!user || !domElements.chatBox) return;
-  if (unsubscriptions.chat) return;
+  if (unsubscriptions.chat) {
+    debugLog("Chat listener already active");
+    return;
+  }
 
   debugLog("Starting chat listener");
   const messagesRef = collection(db, "servers", "defaultServer", "messages");
   const q = query(messagesRef, orderBy("timestamp"));
-  
-  // Clear chatbox for initial load
-  domElements.chatBox.innerHTML = "";
 
   unsubscriptions.chat = onSnapshot(q, async (snapshot) => {
     try {
-      // **PERFORMANCE FIX**: Instead of re-rendering everything, only process new messages.
-      const changes = snapshot.docChanges();
-      if (changes.length === 0) return;
+      debugLog("Chat messages updated:", snapshot.docs.length);
+      const messages = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      const missing = new Set();
+      messages.forEach(m => { if (m.senderId && !profileCache[m.senderId]) missing.add(m.senderId); });
+      if (missing.size) await Promise.all(Array.from(missing).map(uid => fetchProfile(uid)));
 
-      const newMessages = changes
-        .filter(change => change.type === 'added')
-        .map(change => change.doc.data());
+      domElements.chatBox.innerHTML = "";
+      for (const m of messages) {
+        const uid = m.senderId;
+        const prof = uid ? (profileCache[uid] || { username: m.senderName || "Unknown", photoURL: m.senderPhotoURL || "" }) : { username: m.senderName || "Unknown", photoURL: "" };
+        const name = prof.username || m.senderName || "Unknown";
+        const avatar = prof.photoURL || m.senderPhotoURL || defaultAvatar();
+        const timeStr = m.timestamp && m.timestamp.toDate ? new Date(m.timestamp.toDate()).toLocaleString() : "";
 
-      // Fetch any missing user profiles for the new messages
-      const missingProfiles = new Set();
-      newMessages.forEach(m => {
-        if (m.senderId && !profileCache[m.senderId]) {
-          missingProfiles.add(m.senderId);
-        }
-      });
-      if (missingProfiles.size > 0) {
-        await Promise.all(Array.from(missingProfiles).map(uid => fetchProfile(uid)));
-      }
-      
-      // Check if user is scrolled to the bottom before adding new messages
-      const shouldScroll = domElements.chatBox.scrollTop + domElements.chatBox.clientHeight >= domElements.chatBox.scrollHeight - 50;
+        if (domElements.chatMessageTemplate) {
+          const clone = domElements.chatMessageTemplate.content.cloneNode(true);
+          const img = clone.querySelector("img.avatar");
+          const senderNameEl = clone.querySelector(".sender-name");
+          const timeEl = clone.querySelector(".time");
+          const textEl = clone.querySelector(".message-text");
 
-      for (const change of changes) {
-        if (change.type === "added") {
-          const messageData = { id: change.doc.id, ...change.doc.data() };
-          const messageElement = createMessageElement(messageData);
-          if (messageElement) {
-            domElements.chatBox.appendChild(messageElement);
+          if (img) {
+            img.src = avatar;
+            img.setAttribute("data-uid", uid || "");
+            img.style.cursor = uid ? "pointer" : "default";
           }
-        }
-        // You could also handle 'modified' or 'removed' message types here if needed
-      }
-      
-      // Auto-scroll only if the user was already at the bottom
-      if (shouldScroll) {
-        domElements.chatBox.scrollTop = domElements.chatBox.scrollHeight;
-      }
 
+          if (senderNameEl) {
+            senderNameEl.textContent = name;
+            senderNameEl.setAttribute("data-uid", uid || "");
+            senderNameEl.style.cursor = uid ? "pointer" : "default";
+          }
+
+          if (timeEl) timeEl.textContent = timeStr;
+          if (textEl) textEl.innerHTML = escapeHtml(m.text || "");
+
+          const wrapper = document.createElement("div");
+          wrapper.appendChild(clone);
+          domElements.chatBox.appendChild(wrapper.firstElementChild || wrapper);
+        } else {
+          const p = document.createElement("p");
+          p.innerHTML = `<strong data-uid="${uid}">${escapeHtml(name)}</strong>: ${escapeHtml(m.text || "")}`;
+          domElements.chatBox.appendChild(p);
+        }
+      }
+      domElements.chatBox.scrollTop = domElements.chatBox.scrollHeight;
     } catch (err) {
       debugError("Chat render error:", err);
     }
   }, err => {
     debugError("Chat onSnapshot error:", err);
-    if (err?.code === "permission-denied" && domElements.chatBox) {
+    if (err && err.code === "permission-denied" && domElements.chatBox) {
       domElements.chatBox.innerHTML = "<div style='color:crimson'>Permission denied reading messages. Check Firestore rules.</div>";
     }
   });
 
   // Name/avatar click -> profile
   domElements.chatBox.addEventListener("click", (ev) => {
-    const target = ev.target.closest("[data-uid]");
-    if (target) {
-      const uid = target.getAttribute("data-uid");
-      if (uid) openProfile(uid);
-    }
+    const t = ev.target;
+    const uid = t.getAttribute?.("data-uid") || t.closest?.("[data-uid]")?.getAttribute("data-uid");
+    if (uid) openProfile(uid);
   });
 
   // Send messages
   if (domElements.sendBtn) {
-    const sendMessage = async () => {
-      const text = domElements.msgInput?.value.trim();
-      if (!text || !auth.currentUser) return;
-
+    domElements.sendBtn.onclick = async () => {
+      const text = (domElements.msgInput && domElements.msgInput.value || "").trim();
+      if (!text) return;
+      if (!auth.currentUser) return alert("You must be signed in to send messages.");
       try {
-        const me = profileCache[auth.currentUser.uid] || await fetchProfile(auth.currentUser.uid);
+        await fetchProfile(auth.currentUser.uid);
+        const me = profileCache[auth.currentUser.uid] || {};
         await addDoc(collection(db, "servers", "defaultServer", "messages"), {
           text,
           senderId: auth.currentUser.uid,
-          senderName: me.username || auth.currentUser.email?.split("@")[0] || "User",
+          senderName: me.username || auth.currentUser.email || "User",
           senderPhotoURL: me.photoURL || "",
           timestamp: serverTimestamp()
         });
@@ -496,13 +471,14 @@ function startChatListener(user) {
       }
     };
 
-    domElements.sendBtn.onclick = sendMessage;
-    domElements.msgInput?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
+    if (domElements.msgInput) {
+      domElements.msgInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          domElements.sendBtn.click();
+        }
+      });
+    }
   }
 }
 
@@ -574,7 +550,7 @@ function startIncomingRequestsListener(user) {
         });
 
         const btnWrap = document.createElement("span");
-        btnWrap.style.marginLeft = "auto"; // Push buttons to the right
+        btnWrap.style.marginLeft = "8px";
         btnWrap.appendChild(accept);
         btnWrap.appendChild(decline);
         wrapper.appendChild(btnWrap);
@@ -619,7 +595,7 @@ function startOutgoingRequestsListener(user) {
         if (data.processed === true) continue;
 
         try {
-          const myRef = doc(db, "users", user.uid);
+                              const myRef = doc(db, "users", user.uid);
           await updateDoc(myRef, { friends: arrayUnion(toUid) });
           await updateDoc(doc(db, "friendRequests", d.id), { processed: true, processedAt: serverTimestamp() });
           debugLog("Processed accepted request from", toUid);
@@ -659,33 +635,54 @@ function startUserDocListener(user) {
     // Ensure UI is visible
     showSignedInState(user);
 
+    // ====================================================================
+    // ===== MODIFICATION START: Friend Verification & UI Rendering Fix =====
+    // ====================================================================
+
     const friends = Array.isArray(data.friends) ? data.friends : [];
     const verifiedFriends = [];
     const friendsToRemove = [];
 
-    // --- Friend Removal Check (Self-Healing) ---
+    // --- Friend Removal Check ---
+    // This section verifies that each person on your friends list also has you on theirs.
+    // If the friendship is not reciprocal or the user was deleted, they are removed.
     if (friends.length > 0) {
-      debugLog(`Verifying ${friends.length} friendships...`);
-      const friendDocsSnaps = await Promise.all(friends.map(uid => getDoc(doc(db, "users", uid))));
+      debugLog(`Verifying ${friends.length} friendships for reciprocity...`);
+      const friendDocsPromises = friends.map(uid => getDoc(doc(db, "users", uid)));
+      const friendDocsSnaps = await Promise.all(friendDocsPromises);
 
       friendDocsSnaps.forEach((friendSnap, index) => {
         const friendUid = friends[index];
-        if (friendSnap.exists() && Array.isArray(friendSnap.data().friends) && friendSnap.data().friends.includes(user.uid)) {
-          verifiedFriends.push(friendUid);
+        if (friendSnap.exists()) {
+          const friendData = friendSnap.data();
+          // Check if they have the current user in their friends list
+          if (Array.isArray(friendData.friends) && friendData.friends.includes(user.uid)) {
+            verifiedFriends.push(friendUid);
+          } else {
+            debugLog(`Friendship not reciprocated by ${friendUid}. Marking for removal.`);
+            friendsToRemove.push(friendUid);
+          }
         } else {
+          // Friend's user document has been deleted.
+          debugLog(`Friend document for ${friendUid} not found. Marking for removal.`);
           friendsToRemove.push(friendUid);
         }
       });
 
       if (friendsToRemove.length > 0) {
-        debugLog(`Removing ${friendsToRemove.length} non-reciprocal friends.`, friendsToRemove);
+        debugLog(`Removing ${friendsToRemove.length} stale friend entries.`, friendsToRemove);
+        // Update the user's document with the clean list of verified friends.
         await updateDoc(userRef, { friends: verifiedFriends });
-        return; // Listener will re-run with the corrected list
+        // The listener will re-run automatically after this update, so we can stop here
+        // to avoid rendering the old, incorrect list.
+        return;
       }
     }
 
     // --- Render Friends List ---
     try {
+      debugLog("Rendering", friends.length, "friends");
+
       if (domElements.friendsList) {
         domElements.friendsList.innerHTML = "";
         if (!friends.length) {
@@ -695,28 +692,34 @@ function startUserDocListener(user) {
           for (const uid of friends) {
             const p = profileCache[uid] || { username: uid, photoURL: "" };
             if (domElements.friendItemTemplate) {
+
+              // **BUG FIX**: This logic correctly handles the friend item template.
+              // It creates a wrapper for each friend to ensure the entire item (image and name)
+              // is added to the list and is clickable.
+
               const clone = domElements.friendItemTemplate.content.cloneNode(true);
+
+              // Create a wrapper to ensure consistent structure and event handling.
               const friendItemWrapper = document.createElement("li");
               friendItemWrapper.className = "friend-item";
 
+              // Find and populate elements within the cloned template.
               const img = clone.querySelector(".friend-avatar");
               const nameEl = clone.querySelector(".friend-name");
+              if (img) img.src = p.photoURL || defaultAvatar();
+              if (nameEl) nameEl.textContent = p.username || uid;
 
-              if (img) {
-                img.src = p.photoURL || defaultAvatar();
-                // **PFP FIX**: Ensure the sizing class is always present
-                img.classList.add("avatar-small");
-              }
-              if (nameEl) {
-                nameEl.textContent = p.username || uid;
-              }
-
+              // Append the entire populated template content to our wrapper.
               friendItemWrapper.appendChild(clone);
+
+              // Add the click listener to the wrapper, making the whole item clickable.
               friendItemWrapper.addEventListener("click", () => openProfile(uid));
+
+              // Append the final, fully-constructed item to the friends list.
               domElements.friendsList.appendChild(friendItemWrapper);
 
             } else {
-              // Fallback
+              // Fallback logic (if template doesn't exist) remains the same.
               const li = document.createElement("li");
               li.className = "friend-item";
               li.innerHTML = `<img src="${p.photoURL || defaultAvatar()}" class="avatar-small" /><span>${escapeHtml(p.username || uid)}</span>`;
@@ -728,9 +731,18 @@ function startUserDocListener(user) {
       }
     } catch (err) {
       debugError("Error rendering friends", err);
+      if (domElements.friendsList) {
+        domElements.friendsList.innerHTML = "<div class='small'>Failed to load friends</div>";
+      }
     }
+    // ==================================================================
+    // ===== MODIFICATION END: Friend Verification & UI Rendering Fix =====
+    // ==================================================================
   }, err => {
     debugError("User doc snapshot error:", err);
+    if (domElements.friendsList) {
+      domElements.friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
+    }
   });
 }
 
@@ -754,7 +766,10 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // Fallback initialization if DOM is already loaded
-if (document.readyState !== 'loading') {
+if (document.readyState === 'loading') {
+  // Do nothing, DOMContentLoaded will fire
+} else {
+  // DOM is already loaded
   debugLog("=== DOM ALREADY LOADED ===");
   setTimeout(initializeApp, 100);
 }
