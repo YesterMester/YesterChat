@@ -14,8 +14,7 @@ import {
   serverTimestamp,
   getDoc,
   getDocs,
-  arrayUnion,
-  writeBatch // **MODIFICATION**: Imported for atomic operations
+  arrayUnion
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
 import { uploadProfileImage } from "./cloudinary.js"; // still needed by profile page
@@ -305,7 +304,7 @@ function setupAuthStateListener() {
       startUserDocListener(user);
       startChatListener(user);
       startIncomingRequestsListener(user);
-      // **REMOVED**: startOutgoingRequestsListener(user); // This is now handled by the atomic accept operation
+      startOutgoingRequestsListener(user); // **FIX**: This is required again
 
       debugLog("=== USER INITIALIZATION COMPLETE ===");
     } catch (err) {
@@ -539,42 +538,25 @@ function startIncomingRequestsListener(user) {
         accept.textContent = "Accept";
         const decline = document.createElement("button");
         decline.textContent = "Decline";
-
-        // =================================================================
-        // ===== MODIFICATION START: Atomic Friend Acceptance using Batch =====
-        // =================================================================
+        
+        // **FIX**: Reverted to the original, secure method of accepting requests.
         accept.addEventListener("click", async (ev) => {
           ev.stopPropagation();
-          const myUid = user.uid;
-          const theirUid = fromUid;
-
           try {
-            const batch = writeBatch(db);
-
-            // 1. Update the friend request to 'accepted'
-            const requestRef = doc(db, "friendRequests", d.id);
-            batch.update(requestRef, { status: "accepted", respondedAt: serverTimestamp() });
-
-            // 2. Add them to my friends list
-            const myRef = doc(db, "users", myUid);
-            batch.update(myRef, { friends: arrayUnion(theirUid) });
-
-            // 3. Add me to their friends list
-            const theirRef = doc(db, "users", theirUid);
-            batch.update(theirRef, { friends: arrayUnion(myUid) });
-
-            // Commit all changes at once
-            await batch.commit();
-            debugLog(`Friendship with ${theirUid} created successfully.`);
+            // Step 1: Update the friend request document
+            await updateDoc(doc(db, "friendRequests", d.id), {
+              status: "accepted",
+              respondedAt: serverTimestamp(),
+              acceptedBy: user.uid
+            });
+            // Step 2: Update ONLY the current user's friends array
+            const meRef = doc(db, "users", user.uid);
+            await updateDoc(meRef, { friends: arrayUnion(fromUid) });
           } catch (err) {
-            debugError("Accept friend (batch) failed", err);
-            alert("Failed to accept friend request. Please try again.");
+            debugError("Accept failed", err);
+            alert("Accept failed. Check console for details.");
           }
         });
-        // ===============================================================
-        // ===== MODIFICATION END: Atomic Friend Acceptance using Batch =====
-        // ===============================================================
-
 
         decline.addEventListener("click", async (ev) => {
           ev.stopPropagation();
@@ -612,6 +594,46 @@ function startIncomingRequestsListener(user) {
   });
 }
 
+// **FIX**: Restored this function to handle the other side of the friend request.
+/* ===== Outgoing friend requests listener ===== */
+function startOutgoingRequestsListener(user) {
+  if (!user) return;
+  if (unsubscriptions.outgoingRequests) return;
+
+  debugLog("Starting outgoing requests listener");
+  const q = query(
+    collection(db, "friendRequests"),
+    where("fromUid", "==", user.uid),
+    where("status", "==", "accepted")
+  );
+
+  unsubscriptions.outgoingRequests = onSnapshot(q, async snapshot => {
+    try {
+      if (snapshot.empty) return;
+      debugLog("Processing", snapshot.docs.length, "accepted outgoing requests");
+
+      for (const d of snapshot.docs) {
+        const data = d.data();
+        const toUid = data.toUid;
+        if (data.processed === true) continue;
+
+        try {
+          const myRef = doc(db, "users", user.uid);
+          await updateDoc(myRef, { friends: arrayUnion(toUid) });
+          await updateDoc(doc(db, "friendRequests", d.id), { processed: true, processedAt: serverTimestamp() });
+          debugLog("Processed accepted request from", toUid);
+        } catch (err) {
+          debugError("Outgoing request processing failed for", d.id, err);
+        }
+      }
+    } catch (err) {
+      debugError("Outgoing requests snapshot error:", err);
+    }
+  }, err => {
+    debugError("Outgoing requests onSnapshot error:", err);
+  });
+}
+
 /* ===== User doc listener for friends & topbar updates ===== */
 function startUserDocListener(user) {
   if (!user) return;
@@ -637,28 +659,47 @@ function startUserDocListener(user) {
     showSignedInState(user);
 
     const friends = Array.isArray(data.friends) ? data.friends : [];
-    const verifiedFriends = [];
-    const friendsToRemove = [];
-
-    // --- Friend Removal Check (Self-Healing for Unfriending) ---
+    
+    // --- Smarter Friend Verification Logic ---
     if (friends.length > 0) {
+      const verifiedFriends = [];
+      const friendsToRemove = [];
+      
+      // Get requests I recently accepted to prevent incorrectly removing new friends
+      const acceptedRequestsQuery = query(
+        collection(db, "friendRequests"),
+        where("toUid", "==", user.uid),
+        where("status", "==", "accepted")
+      );
+      const acceptedRequestsSnap = await getDocs(acceptedRequestsQuery);
+      const recentlyAcceptedSenderIds = new Set(
+        acceptedRequestsSnap.docs.map(d => d.data().fromUid)
+      );
+
       const friendDocsSnaps = await Promise.all(friends.map(uid => getDoc(doc(db, "users", uid))));
 
       friendDocsSnaps.forEach((friendSnap, index) => {
         const friendUid = friends[index];
-        // Check if friend exists and if they have us in their friends list
-        if (friendSnap.exists() && Array.isArray(friendSnap.data().friends) && friendSnap.data().friends.includes(user.uid)) {
+        const isReciprocal = friendSnap.exists() && friendSnap.data().friends?.includes(user.uid);
+
+        if (isReciprocal) {
           verifiedFriends.push(friendUid);
         } else {
-          // If not, mark them for removal
-          friendsToRemove.push(friendUid);
+          // If not reciprocal, check if it's because I just accepted their request
+          if (recentlyAcceptedSenderIds.has(friendUid)) {
+            // This is a new friend, don't remove them. They will sync up shortly.
+            verifiedFriends.push(friendUid);
+          } else {
+            // This is a genuinely broken link (e.g., an unfriend action). Mark for removal.
+            friendsToRemove.push(friendUid);
+          }
         }
       });
 
       if (friendsToRemove.length > 0) {
         debugLog(`Removing ${friendsToRemove.length} non-reciprocal friends.`, friendsToRemove);
         await updateDoc(userRef, { friends: verifiedFriends });
-        return; // Listener will re-run with the corrected list, so we stop here
+        return; // Listener will re-run with the corrected list
       }
     }
 
@@ -682,7 +723,7 @@ function startUserDocListener(user) {
 
               if (img) {
                 img.src = p.photoURL || defaultAvatar();
-                img.classList.add("avatar-small"); // Ensures consistent sizing
+                img.classList.add("avatar-small");
               }
               if (nameEl) {
                 nameEl.textContent = p.username || uid;
