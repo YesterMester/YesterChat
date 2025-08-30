@@ -1,4 +1,4 @@
-// script.js — Fixed with extensive debugging for auth state issues
+// script.js — Complete fixed version with friend request accept fix and cross-tab communication
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import {
@@ -17,7 +17,7 @@ import {
   arrayUnion
 } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
-import { uploadProfileImage } from "./cloudinary.js"; // still needed by profile page
+import { uploadProfileImage } from "./cloudinary.js";
 
 /* ===== Debug Logging ===== */
 function debugLog(message, data = null) {
@@ -78,7 +78,7 @@ let authChecked = false;
 let authReady = false;
 let currentUser = null;
 let unsubscriptions = { chat: null, userDoc: null, incomingRequests: null, outgoingRequests: null };
-const profileCache = {}; // uid -> profile data cache
+const profileCache = {};
 
 /* ===== Helpers ===== */
 function defaultAvatar() { return "https://www.gravatar.com/avatar/?d=mp&s=160"; }
@@ -146,7 +146,6 @@ function cleanupRealtime() {
     try { unsubscriptions[k]?.(); } catch (e) {}
     unsubscriptions[k] = null;
   });
-  // clear UI sections
   if (domElements.chatBox) domElements.chatBox.innerHTML = "";
   if (domElements.friendsList) domElements.friendsList.innerHTML = "";
   if (domElements.friendRequestsContainer) domElements.friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
@@ -248,7 +247,6 @@ function forceUIUpdate() {
     debugLog("User exists, forcing signed in state", { uid: user.uid });
     showSignedInState(user);
 
-    // Update profile info if cached
     const profile = profileCache[user.uid];
     if (profile) {
       if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = profile.photoURL || defaultAvatar();
@@ -258,6 +256,61 @@ function forceUIUpdate() {
   } else {
     debugLog("No user, forcing signed out state");
     showSignedOutState();
+  }
+}
+
+/* ===== Cross-Tab Communication and Friend Removal ===== */
+function setupCrossTabCommunication() {
+  debugLog("Setting up cross-tab communication for friend updates");
+  
+  window.addEventListener('storage', function(e) {
+    if (e.key === 'friendsUpdate' && e.newValue) {
+      try {
+        const updateEvent = JSON.parse(e.newValue);
+        debugLog("Received friend update event:", updateEvent);
+        
+        if (updateEvent.type === 'FRIEND_REMOVED' && 
+            updateEvent.userId === currentUser?.uid) {
+          debugLog("Processing friend removal for current user");
+          removeFriendFromUI(updateEvent.friendUid);
+        }
+      } catch (error) {
+        debugError("Error processing friend update event:", error);
+      }
+    }
+  });
+  
+  window.addEventListener('message', function(event) {
+    if (event.origin !== window.location.origin) return;
+    
+    if (event.data.type === 'FRIEND_REMOVED' && 
+        event.data.userId === currentUser?.uid) {
+      debugLog("Received friend removal message from profile window");
+      removeFriendFromUI(event.data.friendUid);
+    }
+  });
+}
+
+function removeFriendFromUI(removedFriendUid) {
+  debugLog(`Removing friend ${removedFriendUid} from UI`);
+  
+  if (!domElements.friendsList) return;
+  
+  const friendElements = domElements.friendsList.querySelectorAll('[data-friend-uid]');
+  friendElements.forEach(element => {
+    if (element.getAttribute('data-friend-uid') === removedFriendUid) {
+      element.remove();
+      debugLog(`Removed friend ${removedFriendUid} from friends list UI`);
+    }
+  });
+  
+  if (domElements.friendsList.children.length === 0) {
+    domElements.friendsList.innerHTML = "<div class='small'>No friends yet</div>";
+  }
+  
+  if (profileCache[removedFriendUid]) {
+    delete profileCache[removedFriendUid];
+    debugLog(`Removed ${removedFriendUid} from profile cache`);
   }
 }
 
@@ -276,7 +329,6 @@ function setupAuthStateListener() {
       debugLog("User signed out");
       showSignedOutState();
 
-      // Friendly redirect to auth page after 8s
       setTimeout(() => {
         if (!auth.currentUser && authReady) {
           debugLog("Redirecting to auth.html - no user found");
@@ -286,25 +338,21 @@ function setupAuthStateListener() {
       return;
     }
 
-    // User signed in
     try {
       debugLog("User is signed in, initializing...");
       await ensureMyUserDoc(user);
 
       const me = profileCache[user.uid] || await fetchProfile(user.uid);
 
-      // Update topbar immediately
       if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = me.photoURL || defaultAvatar();
       if (domElements.meName) domElements.meName.textContent = me.username || (user.displayName || (user.email ? user.email.split("@")[0] : "User"));
 
-      // Show signed in state
       showSignedInState(user);
 
-      // Start listeners
       startUserDocListener(user);
       startChatListener(user);
       startIncomingRequestsListener(user);
-      startOutgoingRequestsListener(user); // **FIX**: This is required again
+      startOutgoingRequestsListener(user);
 
       debugLog("=== USER INITIALIZATION COMPLETE ===");
     } catch (err) {
@@ -317,22 +365,17 @@ function setupAuthStateListener() {
 function initializeApp() {
   debugLog("=== INITIALIZING APP ===");
 
-  // Initialize DOM elements
   initializeDOMElements();
 
-  // Check if Firebase is ready
   if (!auth || !db) {
     debugError("Firebase not initialized!");
     return;
   }
 
-  // Setup auth buttons
   setupAuthButtons();
-
-  // Setup auth state listener
+  setupCrossTabCommunication();
   setupAuthStateListener();
 
-  // Force initial UI update after delay
   setTimeout(forceUIUpdate, 1000);
 
   debugLog("=== APP INITIALIZATION COMPLETE ===");
@@ -371,11 +414,6 @@ function setupAuthButtons() {
   }
 }
 
-/**
- * Creates an HTML element for a single chat message.
- * @param {object} messageData - The message data from Firestore.
- * @returns {HTMLElement | null} The message element or null if template is missing.
- */
 function createMessageElement(messageData) {
   const { senderId, senderName, senderPhotoURL, text, timestamp } = messageData;
   if (!domElements.chatMessageTemplate) return null;
@@ -386,7 +424,7 @@ function createMessageElement(messageData) {
   const timeStr = timestamp?.toDate ? new Date(timestamp.toDate()).toLocaleString() : "";
 
   const clone = domElements.chatMessageTemplate.content.cloneNode(true);
-  const msgElement = clone.querySelector(".chat-message"); // Main container
+  const msgElement = clone.querySelector(".chat-message");
   const imgEl = clone.querySelector("img.avatar");
   const senderNameEl = clone.querySelector(".sender-name");
   const timeEl = clone.querySelector(".time");
@@ -411,8 +449,7 @@ function startChatListener(user) {
   debugLog("Starting chat listener");
   const messagesRef = collection(db, "servers", "defaultServer", "messages");
   const q = query(messagesRef, orderBy("timestamp"));
-  
-  // Clear chatbox for initial load
+
   domElements.chatBox.innerHTML = "";
 
   unsubscriptions.chat = onSnapshot(q, async (snapshot) => {
@@ -433,7 +470,7 @@ function startChatListener(user) {
       if (missingProfiles.size > 0) {
         await Promise.all(Array.from(missingProfiles).map(uid => fetchProfile(uid)));
       }
-      
+
       const shouldScroll = domElements.chatBox.scrollTop + domElements.chatBox.clientHeight >= domElements.chatBox.scrollHeight - 50;
 
       for (const change of changes) {
@@ -445,7 +482,7 @@ function startChatListener(user) {
           }
         }
       }
-      
+
       if (shouldScroll) {
         domElements.chatBox.scrollTop = domElements.chatBox.scrollHeight;
       }
@@ -460,7 +497,6 @@ function startChatListener(user) {
     }
   });
 
-  // Name/avatar click -> profile
   domElements.chatBox.addEventListener("click", (ev) => {
     const target = ev.target.closest("[data-uid]");
     if (target) {
@@ -469,7 +505,6 @@ function startChatListener(user) {
     }
   });
 
-  // Send messages
   if (domElements.sendBtn) {
     const sendMessage = async () => {
       const text = domElements.msgInput?.value.trim();
@@ -538,23 +573,65 @@ function startIncomingRequestsListener(user) {
         accept.textContent = "Accept";
         const decline = document.createElement("button");
         decline.textContent = "Decline";
-        
-        // **FIX**: Reverted to the original, secure method of accepting requests.
+
+        // Enhanced accept handler with better error handling
         accept.addEventListener("click", async (ev) => {
           ev.stopPropagation();
+          
+          accept.disabled = true;
+          accept.textContent = "Accepting...";
+          
           try {
-            // Step 1: Update the friend request document
-            await updateDoc(doc(db, "friendRequests", d.id), {
+            debugLog(`Attempting to accept friend request from ${fromUid}`);
+            
+            const requestRef = doc(db, "friendRequests", d.id);
+            await updateDoc(requestRef, {
               status: "accepted",
               respondedAt: serverTimestamp(),
               acceptedBy: user.uid
             });
-            // Step 2: Update ONLY the current user's friends array
+            debugLog("Friend request marked as accepted");
+            
             const meRef = doc(db, "users", user.uid);
-            await updateDoc(meRef, { friends: arrayUnion(fromUid) });
+            
+            const currentUserSnap = await getDoc(meRef);
+            if (!currentUserSnap.exists()) {
+              throw new Error("Current user document not found");
+            }
+            
+            const currentUserData = currentUserSnap.data();
+            const currentFriends = Array.isArray(currentUserData.friends) ? currentUserData.friends : [];
+            
+            if (!currentFriends.includes(fromUid)) {
+              await updateDoc(meRef, { 
+                friends: arrayUnion(fromUid),
+                updatedAt: serverTimestamp()
+              });
+              debugLog(`Added ${fromUid} to current user's friends list`);
+            } else {
+              debugLog(`${fromUid} already in friends list, skipping add`);
+            }
+            
+            debugLog("Friend request accepted successfully");
+            
           } catch (err) {
-            debugError("Accept failed", err);
-            alert("Accept failed. Check console for details.");
+            debugError("Accept friend request failed:", err);
+            
+            let errorMessage = "Accept failed: ";
+            if (err.code === 'permission-denied') {
+              errorMessage += "Permission denied. Check Firestore rules.";
+            } else if (err.code === 'not-found') {
+              errorMessage += "Friend request or user not found.";
+            } else if (err.code === 'network-request-failed') {
+              errorMessage += "Network error. Check your connection.";
+            } else {
+              errorMessage += err.message || "Unknown error occurred.";
+            }
+            
+            alert(errorMessage);
+            
+            accept.disabled = false;
+            accept.textContent = "Accept";
           }
         });
 
@@ -594,7 +671,6 @@ function startIncomingRequestsListener(user) {
   });
 }
 
-// **FIX**: Restored this function to handle the other side of the friend request.
 /* ===== Outgoing friend requests listener ===== */
 function startOutgoingRequestsListener(user) {
   if (!user) return;
@@ -651,21 +727,17 @@ function startUserDocListener(user) {
     profileCache[user.uid] = data;
     debugLog("User doc updated:", data);
 
-    // Update topbar
     if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = data.photoURL || defaultAvatar();
     if (domElements.meName) domElements.meName.textContent = data.username || (auth.currentUser?.email ? auth.currentUser.email.split("@")[0] : "User");
 
-    // Ensure UI is visible
     showSignedInState(user);
 
     const friends = Array.isArray(data.friends) ? data.friends : [];
-    
-    // --- Smarter Friend Verification Logic ---
+
     if (friends.length > 0) {
       const verifiedFriends = [];
       const friendsToRemove = [];
-      
-      // Get requests I recently accepted to prevent incorrectly removing new friends
+
       const acceptedRequestsQuery = query(
         collection(db, "friendRequests"),
         where("toUid", "==", user.uid),
@@ -685,12 +757,9 @@ function startUserDocListener(user) {
         if (isReciprocal) {
           verifiedFriends.push(friendUid);
         } else {
-          // If not reciprocal, check if it's because I just accepted their request
           if (recentlyAcceptedSenderIds.has(friendUid)) {
-            // This is a new friend, don't remove them. They will sync up shortly.
             verifiedFriends.push(friendUid);
           } else {
-            // This is a genuinely broken link (e.g., an unfriend action). Mark for removal.
             friendsToRemove.push(friendUid);
           }
         }
@@ -699,11 +768,10 @@ function startUserDocListener(user) {
       if (friendsToRemove.length > 0) {
         debugLog(`Removing ${friendsToRemove.length} non-reciprocal friends.`, friendsToRemove);
         await updateDoc(userRef, { friends: verifiedFriends });
-        return; // Listener will re-run with the corrected list
+        return;
       }
     }
 
-    // --- Render Friends List ---
     try {
       if (domElements.friendsList) {
         domElements.friendsList.innerHTML = "";
@@ -713,20 +781,26 @@ function startUserDocListener(user) {
           await Promise.all(friends.map(uid => fetchProfile(uid)));
           for (const uid of friends) {
             const p = profileCache[uid] || { username: uid, photoURL: "" };
+            
             if (domElements.friendItemTemplate) {
               const clone = domElements.friendItemTemplate.content.cloneNode(true);
               const friendItemWrapper = document.createElement("li");
               friendItemWrapper.className = "friend-item";
+              friendItemWrapper.setAttribute("data-friend-uid", uid);
 
               const img = clone.querySelector(".friend-avatar");
               const nameEl = clone.querySelector(".friend-name");
 
               if (img) {
                 img.src = p.photoURL || defaultAvatar();
-                img.classList.add("avatar-small");
+                img.className = "friend-avatar avatar-small";
+                img.style.cssText = "width: 32px; height: 32px; border-radius: 50%; object-fit: cover; margin-right: 8px;";
+                img.onerror = function() { this.src = defaultAvatar(); };
               }
+              
               if (nameEl) {
                 nameEl.textContent = p.username || uid;
+                nameEl.style.cssText = "flex: 1; font-weight: 500;";
               }
 
               friendItemWrapper.appendChild(clone);
@@ -734,10 +808,23 @@ function startUserDocListener(user) {
               domElements.friendsList.appendChild(friendItemWrapper);
 
             } else {
-              // Fallback
               const li = document.createElement("li");
               li.className = "friend-item";
-              li.innerHTML = `<img src="${p.photoURL || defaultAvatar()}" class="avatar-small" /><span>${escapeHtml(p.username || uid)}</span>`;
+              li.setAttribute("data-friend-uid", uid);
+              li.style.cssText = "display: flex; align-items: center; padding: 8px; cursor: pointer; border: 1px solid #ddd; margin: 4px; border-radius: 4px;";
+              
+              const img = document.createElement("img");
+              img.src = p.photoURL || defaultAvatar();
+              img.className = "avatar-small";
+              img.style.cssText = "width: 32px; height: 32px; border-radius: 50%; object-fit: cover; margin-right: 8px;";
+              img.onerror = function() { this.src = defaultAvatar(); };
+              
+              const span = document.createElement("span");
+              span.textContent = p.username || uid;
+              span.style.cssText = "flex: 1; font-weight: 500;";
+              
+              li.appendChild(img);
+              li.appendChild(span);
               li.addEventListener("click", () => openProfile(uid));
               domElements.friendsList.appendChild(li);
             }
@@ -746,13 +833,19 @@ function startUserDocListener(user) {
       }
     } catch (err) {
       debugError("Error rendering friends", err);
+      if (domElements.friendsList) {
+        domElements.friendsList.innerHTML = "<div class='small'>Failed to load friends</div>";
+      }
     }
   }, err => {
     debugError("User doc snapshot error:", err);
+    if (domElements.friendsList) {
+      domElements.friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
+    }
   });
 }
 
-/* ===== Helper functions (keeping original API) ===== */
+/* ===== Helper functions ===== */
 async function hasExistingPendingRequestBetween(aUid, bUid) {
   try {
     const q1 = query(collection(db, "friendRequests"), where("fromUid", "==", aUid), where("toUid", "==", bUid), where("status", "==", "pending"));
@@ -771,7 +864,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeApp();
 });
 
-// Fallback initialization if DOM is already loaded
 if (document.readyState !== 'loading') {
   debugLog("=== DOM ALREADY LOADED ===");
   setTimeout(initializeApp, 100);
@@ -785,7 +877,6 @@ setTimeout(() => {
   }
 }, 15000);
 
-// Check if user exists but UI isn't showing after 5 seconds
 setTimeout(() => {
   if (authReady && auth?.currentUser && domElements.chatContainer && domElements.chatContainer.style.display === "none") {
     debugError("User signed in but UI not showing, forcing update");
@@ -793,7 +884,6 @@ setTimeout(() => {
   }
 }, 5000);
 
-// Add debug info to window for console debugging
 if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
   window.debugScript = {
     forceUIUpdate,
