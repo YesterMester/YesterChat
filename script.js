@@ -155,43 +155,43 @@ function cleanupRealtime() {
 /* Show signed out state */
 function showSignedOutState() {
   debugLog("=== SHOWING SIGNED OUT STATE ===");
-  
+
   if (domElements.mePreview) {
     domElements.mePreview.style.display = "none";
     debugLog("Hidden mePreview");
   }
-  
+
   if (domElements.myProfileBtn) { 
     domElements.myProfileBtn.style.display = "none"; 
     domElements.myProfileBtn.onclick = null; 
     debugLog("Hidden myProfileBtn");
   }
-  
+
   if (domElements.logoutBtn) {
     domElements.logoutBtn.style.display = "none";
     debugLog("Hidden logoutBtn");
   }
-  
+
   if (domElements.authBtn) {
     domElements.authBtn.style.display = "inline-block";
     debugLog("Shown authBtn");
   }
-  
+
   if (domElements.signedOutNotice) {
     domElements.signedOutNotice.style.display = "block";
     debugLog("Shown signedOutNotice");
   }
-  
+
   if (domElements.chatContainer) {
     domElements.chatContainer.style.display = "none";
     debugLog("Hidden chatContainer");
   }
-  
+
   if (domElements.friendsContainer) {
     domElements.friendsContainer.style.display = "none";
     debugLog("Hidden friendsContainer");
   }
-  
+
   cleanupRealtime();
   debugLog("=== SIGNED OUT STATE COMPLETE ===");
 }
@@ -199,43 +199,43 @@ function showSignedOutState() {
 /* Show signed in state */
 function showSignedInState(user) {
   debugLog("=== SHOWING SIGNED IN STATE ===", { uid: user.uid });
-  
+
   if (domElements.mePreview) {
     domElements.mePreview.style.display = "inline-flex";
     debugLog("Shown mePreview");
   }
-  
+
   if (domElements.myProfileBtn) { 
     domElements.myProfileBtn.style.display = "inline-block"; 
     domElements.myProfileBtn.onclick = () => openProfile(user.uid); 
     debugLog("Shown myProfileBtn");
   }
-  
+
   if (domElements.logoutBtn) {
     domElements.logoutBtn.style.display = "inline-block";
     debugLog("Shown logoutBtn");
   }
-  
+
   if (domElements.authBtn) {
     domElements.authBtn.style.display = "none";
     debugLog("Hidden authBtn");
   }
-  
+
   if (domElements.signedOutNotice) {
     domElements.signedOutNotice.style.display = "none";
     debugLog("Hidden signedOutNotice");
   }
-  
+
   if (domElements.friendsContainer) {
     domElements.friendsContainer.style.display = "block";
     debugLog("Shown friendsContainer");
   }
-  
+
   if (domElements.chatContainer) {
     domElements.chatContainer.style.display = "block";
     debugLog("Shown chatContainer");
   }
-  
+
   debugLog("=== SIGNED IN STATE COMPLETE ===");
 }
 
@@ -243,11 +243,11 @@ function showSignedInState(user) {
 function forceUIUpdate() {
   debugLog("=== FORCING UI UPDATE ===");
   const user = auth?.currentUser;
-  
+
   if (user) {
     debugLog("User exists, forcing signed in state", { uid: user.uid });
     showSignedInState(user);
-    
+
     // Update profile info if cached
     const profile = profileCache[user.uid];
     if (profile) {
@@ -264,12 +264,12 @@ function forceUIUpdate() {
 /* ===== Auth State Handling ===== */
 function setupAuthStateListener() {
   debugLog("Setting up auth state listener");
-  
+
   onAuthStateChanged(auth, async (user) => {
     authChecked = true;
     authReady = true;
     currentUser = user;
-    
+
     debugLog("=== AUTH STATE CHANGED ===", user ? { uid: user.uid, email: user.email } : "null");
 
     if (!user) {
@@ -292,7 +292,7 @@ function setupAuthStateListener() {
       await ensureMyUserDoc(user);
 
       const me = profileCache[user.uid] || await fetchProfile(user.uid);
-      
+
       // Update topbar immediately
       if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = me.photoURL || defaultAvatar();
       if (domElements.meName) domElements.meName.textContent = me.username || (user.displayName || (user.email ? user.email.split("@")[0] : "User"));
@@ -316,32 +316,32 @@ function setupAuthStateListener() {
 /* ===== Initialize Everything ===== */
 function initializeApp() {
   debugLog("=== INITIALIZING APP ===");
-  
+
   // Initialize DOM elements
   initializeDOMElements();
-  
+
   // Check if Firebase is ready
   if (!auth || !db) {
     debugError("Firebase not initialized!");
     return;
   }
-  
+
   // Setup auth buttons
   setupAuthButtons();
-  
+
   // Setup auth state listener
   setupAuthStateListener();
-  
+
   // Force initial UI update after delay
   setTimeout(forceUIUpdate, 1000);
-  
+
   debugLog("=== APP INITIALIZATION COMPLETE ===");
 }
 
 /* ===== Auth Buttons Setup ===== */
 function setupAuthButtons() {
   debugLog("Setting up auth buttons");
-  
+
   if (domElements.authBtn) {
     domElements.authBtn.addEventListener("click", () => {
       debugLog("Auth button clicked");
@@ -588,14 +588,14 @@ function startOutgoingRequestsListener(user) {
     try {
       if (snapshot.empty) return;
       debugLog("Processing", snapshot.docs.length, "accepted outgoing requests");
-      
+
       for (const d of snapshot.docs) {
         const data = d.data();
         const toUid = data.toUid;
         if (data.processed === true) continue;
 
         try {
-          const myRef = doc(db, "users", user.uid);
+                              const myRef = doc(db, "users", user.uid);
           await updateDoc(myRef, { friends: arrayUnion(toUid) });
           await updateDoc(doc(db, "friendRequests", d.id), { processed: true, processedAt: serverTimestamp() });
           debugLog("Processed accepted request from", toUid);
@@ -631,15 +631,58 @@ function startUserDocListener(user) {
     // Update topbar
     if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = data.photoURL || defaultAvatar();
     if (domElements.meName) domElements.meName.textContent = data.username || (auth.currentUser?.email ? auth.currentUser.email.split("@")[0] : "User");
-    
+
     // Ensure UI is visible
     showSignedInState(user);
 
-    // Render friends list
+    // ====================================================================
+    // ===== MODIFICATION START: Friend Verification & UI Rendering Fix =====
+    // ====================================================================
+
+    const friends = Array.isArray(data.friends) ? data.friends : [];
+    const verifiedFriends = [];
+    const friendsToRemove = [];
+
+    // --- Friend Removal Check ---
+    // This section verifies that each person on your friends list also has you on theirs.
+    // If the friendship is not reciprocal or the user was deleted, they are removed.
+    if (friends.length > 0) {
+      debugLog(`Verifying ${friends.length} friendships for reciprocity...`);
+      const friendDocsPromises = friends.map(uid => getDoc(doc(db, "users", uid)));
+      const friendDocsSnaps = await Promise.all(friendDocsPromises);
+
+      friendDocsSnaps.forEach((friendSnap, index) => {
+        const friendUid = friends[index];
+        if (friendSnap.exists()) {
+          const friendData = friendSnap.data();
+          // Check if they have the current user in their friends list
+          if (Array.isArray(friendData.friends) && friendData.friends.includes(user.uid)) {
+            verifiedFriends.push(friendUid);
+          } else {
+            debugLog(`Friendship not reciprocated by ${friendUid}. Marking for removal.`);
+            friendsToRemove.push(friendUid);
+          }
+        } else {
+          // Friend's user document has been deleted.
+          debugLog(`Friend document for ${friendUid} not found. Marking for removal.`);
+          friendsToRemove.push(friendUid);
+        }
+      });
+
+      if (friendsToRemove.length > 0) {
+        debugLog(`Removing ${friendsToRemove.length} stale friend entries.`, friendsToRemove);
+        // Update the user's document with the clean list of verified friends.
+        await updateDoc(userRef, { friends: verifiedFriends });
+        // The listener will re-run automatically after this update, so we can stop here
+        // to avoid rendering the old, incorrect list.
+        return;
+      }
+    }
+
+    // --- Render Friends List ---
     try {
-      const friends = Array.isArray(data.friends) ? data.friends : [];
       debugLog("Rendering", friends.length, "friends");
-      
+
       if (domElements.friendsList) {
         domElements.friendsList.innerHTML = "";
         if (!friends.length) {
@@ -649,24 +692,34 @@ function startUserDocListener(user) {
           for (const uid of friends) {
             const p = profileCache[uid] || { username: uid, photoURL: "" };
             if (domElements.friendItemTemplate) {
+
+              // **BUG FIX**: This logic correctly handles the friend item template.
+              // It creates a wrapper for each friend to ensure the entire item (image and name)
+              // is added to the list and is clickable.
+
               const clone = domElements.friendItemTemplate.content.cloneNode(true);
+
+              // Create a wrapper to ensure consistent structure and event handling.
+              const friendItemWrapper = document.createElement("li");
+              friendItemWrapper.className = "friend-item";
+
+              // Find and populate elements within the cloned template.
               const img = clone.querySelector(".friend-avatar");
               const nameEl = clone.querySelector(".friend-name");
               if (img) img.src = p.photoURL || defaultAvatar();
-              if (nameEl) {
-                nameEl.textContent = p.username || uid;
-                nameEl.setAttribute("data-uid", uid);
-              }
-              if (img) img.setAttribute("data-uid", uid);
+              if (nameEl) nameEl.textContent = p.username || uid;
 
-              const tempContainer = document.createElement("div");
-              tempContainer.appendChild(clone);
-              const appended = tempContainer.firstElementChild;
-              if (appended) {
-                appended.addEventListener("click", () => openProfile(uid));
-                domElements.friendsList.appendChild(appended);
-              }
+              // Append the entire populated template content to our wrapper.
+              friendItemWrapper.appendChild(clone);
+
+              // Add the click listener to the wrapper, making the whole item clickable.
+              friendItemWrapper.addEventListener("click", () => openProfile(uid));
+
+              // Append the final, fully-constructed item to the friends list.
+              domElements.friendsList.appendChild(friendItemWrapper);
+
             } else {
+              // Fallback logic (if template doesn't exist) remains the same.
               const li = document.createElement("li");
               li.className = "friend-item";
               li.innerHTML = `<img src="${p.photoURL || defaultAvatar()}" class="avatar-small" /><span>${escapeHtml(p.username || uid)}</span>`;
@@ -682,6 +735,9 @@ function startUserDocListener(user) {
         domElements.friendsList.innerHTML = "<div class='small'>Failed to load friends</div>";
       }
     }
+    // ==================================================================
+    // ===== MODIFICATION END: Friend Verification & UI Rendering Fix =====
+    // ==================================================================
   }, err => {
     debugError("User doc snapshot error:", err);
     if (domElements.friendsList) {
