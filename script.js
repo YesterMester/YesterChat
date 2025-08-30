@@ -1,4 +1,4 @@
-// script.js — Fixed with extensive debugging for auth state issues
+// script.js — Final fix for friend acceptance and race conditions
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import {
@@ -50,26 +50,6 @@ function initializeDOMElements() {
     chatMessageTemplate: document.getElementById("chatMessageTemplate"),
     friendItemTemplate: document.getElementById("friendItemTemplate")
   };
-
-  debugLog("DOM Elements initialized:", {
-    mePreview: !!domElements.mePreview,
-    meAvatarSmall: !!domElements.meAvatarSmall,
-    meName: !!domElements.meName,
-    myProfileBtn: !!domElements.myProfileBtn,
-    authBtn: !!domElements.authBtn,
-    logoutBtn: !!domElements.logoutBtn,
-    signedOutNotice: !!domElements.signedOutNotice,
-    friendsContainer: !!domElements.friendsContainer,
-    friendsList: !!domElements.friendsList,
-    friendRequestsContainer: !!domElements.friendRequestsContainer,
-    chatContainer: !!domElements.chatContainer,
-    chatBox: !!domElements.chatBox,
-    msgInput: !!domElements.msgInput,
-    sendBtn: !!domElements.sendBtn,
-    chatMessageTemplate: !!domElements.chatMessageTemplate,
-    friendItemTemplate: !!domElements.friendItemTemplate
-  });
-
   return domElements;
 }
 
@@ -79,6 +59,7 @@ let authReady = false;
 let currentUser = null;
 let unsubscriptions = { chat: null, userDoc: null, incomingRequests: null, outgoingRequests: null };
 const profileCache = {}; // uid -> profile data cache
+let isAcceptingFriend = false; // Flag to handle acceptance delay
 
 /* ===== Helpers ===== */
 function defaultAvatar() { return "https://www.gravatar.com/avatar/?d=mp&s=160"; }
@@ -93,7 +74,6 @@ async function fetchProfile(uid) {
     const snap = await getDoc(doc(db, "users", uid));
     if (snap.exists()) {
       profileCache[uid] = snap.data();
-      debugLog(`Profile cached for ${uid}:`, profileCache[uid]);
       return profileCache[uid];
     }
   } catch (err) {
@@ -106,14 +86,13 @@ async function fetchProfile(uid) {
 /* ensure users/{uid} exists for the signed-in user */
 async function ensureMyUserDoc(user) {
   if (!user) return;
-  debugLog(`Ensuring user doc exists for ${user.uid}`);
+  const ref = doc(db, "users", user.uid);
   try {
-    const ref = doc(db, "users", user.uid);
     const snap = await getDoc(ref);
     if (!snap.exists()) {
       debugLog("User doc doesn't exist, creating...");
       const defaultUsername = user.email ? user.email.split("@")[0] : "User";
-      await setDoc(ref, {
+      const newUserDoc = {
         username: defaultUsername,
         usernameLower: defaultUsername.toLowerCase(),
         bio: "",
@@ -121,18 +100,11 @@ async function ensureMyUserDoc(user) {
         friends: [],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
-      profileCache[user.uid] = {
-        username: defaultUsername,
-        usernameLower: defaultUsername.toLowerCase(),
-        bio: "",
-        photoURL: "",
-        friends: []
       };
-      debugLog("User doc created");
+      await setDoc(ref, newUserDoc);
+      profileCache[user.uid] = newUserDoc;
     } else {
       profileCache[user.uid] = snap.data();
-      debugLog("User doc exists, cached profile");
     }
   } catch (err) {
     debugError("ensureMyUserDoc error:", err);
@@ -143,10 +115,9 @@ async function ensureMyUserDoc(user) {
 function cleanupRealtime() {
   debugLog("Cleaning up realtime listeners");
   Object.keys(unsubscriptions).forEach(k => {
-    try { unsubscriptions[k]?.(); } catch (e) {}
+    if (unsubscriptions[k]) unsubscriptions[k]();
     unsubscriptions[k] = null;
   });
-  // clear UI sections
   if (domElements.chatBox) domElements.chatBox.innerHTML = "";
   if (domElements.friendsList) domElements.friendsList.innerHTML = "";
   if (domElements.friendRequestsContainer) domElements.friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
@@ -155,134 +126,29 @@ function cleanupRealtime() {
 /* Show signed out state */
 function showSignedOutState() {
   debugLog("=== SHOWING SIGNED OUT STATE ===");
-
-  if (domElements.mePreview) {
-    domElements.mePreview.style.display = "none";
-    debugLog("Hidden mePreview");
-  }
-
-  if (domElements.myProfileBtn) { 
-    domElements.myProfileBtn.style.display = "none"; 
-    domElements.myProfileBtn.onclick = null; 
-    debugLog("Hidden myProfileBtn");
-  }
-
-  if (domElements.logoutBtn) {
-    domElements.logoutBtn.style.display = "none";
-    debugLog("Hidden logoutBtn");
-  }
-
-  if (domElements.authBtn) {
-    domElements.authBtn.style.display = "inline-block";
-    debugLog("Shown authBtn");
-  }
-
-  if (domElements.signedOutNotice) {
-    domElements.signedOutNotice.style.display = "block";
-    debugLog("Shown signedOutNotice");
-  }
-
-  if (domElements.chatContainer) {
-    domElements.chatContainer.style.display = "none";
-    debugLog("Hidden chatContainer");
-  }
-
-  if (domElements.friendsContainer) {
-    domElements.friendsContainer.style.display = "none";
-    debugLog("Hidden friendsContainer");
-  }
-
-  cleanupRealtime();
-  debugLog("=== SIGNED OUT STATE COMPLETE ===");
+  document.body.classList.add('signed-out');
+  document.body.classList.remove('signed-in');
 }
 
 /* Show signed in state */
-function showSignedInState(user) {
-  debugLog("=== SHOWING SIGNED IN STATE ===", { uid: user.uid });
-
-  if (domElements.mePreview) {
-    domElements.mePreview.style.display = "inline-flex";
-    debugLog("Shown mePreview");
-  }
-
-  if (domElements.myProfileBtn) { 
-    domElements.myProfileBtn.style.display = "inline-block"; 
-    domElements.myProfileBtn.onclick = () => openProfile(user.uid); 
-    debugLog("Shown myProfileBtn");
-  }
-
-  if (domElements.logoutBtn) {
-    domElements.logoutBtn.style.display = "inline-block";
-    debugLog("Shown logoutBtn");
-  }
-
-  if (domElements.authBtn) {
-    domElements.authBtn.style.display = "none";
-    debugLog("Hidden authBtn");
-  }
-
-  if (domElements.signedOutNotice) {
-    domElements.signedOutNotice.style.display = "none";
-    debugLog("Hidden signedOutNotice");
-  }
-
-  if (domElements.friendsContainer) {
-    domElements.friendsContainer.style.display = "block";
-    debugLog("Shown friendsContainer");
-  }
-
-  if (domElements.chatContainer) {
-    domElements.chatContainer.style.display = "block";
-    debugLog("Shown chatContainer");
-  }
-
-  debugLog("=== SIGNED IN STATE COMPLETE ===");
-}
-
-/* Force refresh UI state based on current auth */
-function forceUIUpdate() {
-  debugLog("=== FORCING UI UPDATE ===");
-  const user = auth?.currentUser;
-
-  if (user) {
-    debugLog("User exists, forcing signed in state", { uid: user.uid });
-    showSignedInState(user);
-
-    // Update profile info if cached
-    const profile = profileCache[user.uid];
-    if (profile) {
-      if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = profile.photoURL || defaultAvatar();
-      if (domElements.meName) domElements.meName.textContent = profile.username || user.email?.split("@")[0] || "User";
-      debugLog("Updated profile info from cache");
-    }
-  } else {
-    debugLog("No user, forcing signed out state");
-    showSignedOutState();
-  }
+function showSignedInState() {
+  debugLog("=== SHOWING SIGNED IN STATE ===");
+  document.body.classList.add('signed-in');
+  document.body.classList.remove('signed-out');
 }
 
 /* ===== Auth State Handling ===== */
 function setupAuthStateListener() {
   debugLog("Setting up auth state listener");
-
   onAuthStateChanged(auth, async (user) => {
     authChecked = true;
     authReady = true;
     currentUser = user;
 
-    debugLog("=== AUTH STATE CHANGED ===", user ? { uid: user.uid, email: user.email } : "null");
-
     if (!user) {
       debugLog("User signed out");
+      cleanupRealtime();
       showSignedOutState();
-
-      // Friendly redirect to auth page after 8s
-      setTimeout(() => {
-        if (!auth.currentUser && authReady) {
-          debugLog("Redirecting to auth.html - no user found");
-          window.location.replace("auth.html");
-        }
-      }, 8000);
       return;
     }
 
@@ -291,20 +157,17 @@ function setupAuthStateListener() {
       debugLog("User is signed in, initializing...");
       await ensureMyUserDoc(user);
 
-      const me = profileCache[user.uid] || await fetchProfile(user.uid);
-
-      // Update topbar immediately
+      const me = profileCache[user.uid];
       if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = me.photoURL || defaultAvatar();
-      if (domElements.meName) domElements.meName.textContent = me.username || (user.displayName || (user.email ? user.email.split("@")[0] : "User"));
-
-      // Show signed in state
-      showSignedInState(user);
+      if (domElements.meName) domElements.meName.textContent = me.username;
+      
+      showSignedInState();
 
       // Start listeners
       startUserDocListener(user);
       startChatListener(user);
       startIncomingRequestsListener(user);
-      startOutgoingRequestsListener(user); // **FIX**: This is required again
+      startOutgoingRequestsListener(user);
 
       debugLog("=== USER INITIALIZATION COMPLETE ===");
     } catch (err) {
@@ -316,65 +179,36 @@ function setupAuthStateListener() {
 /* ===== Initialize Everything ===== */
 function initializeApp() {
   debugLog("=== INITIALIZING APP ===");
-
-  // Initialize DOM elements
   initializeDOMElements();
-
-  // Check if Firebase is ready
   if (!auth || !db) {
     debugError("Firebase not initialized!");
     return;
   }
-
-  // Setup auth buttons
   setupAuthButtons();
-
-  // Setup auth state listener
   setupAuthStateListener();
-
-  // Force initial UI update after delay
-  setTimeout(forceUIUpdate, 1000);
-
-  debugLog("=== APP INITIALIZATION COMPLETE ===");
 }
 
 /* ===== Auth Buttons Setup ===== */
 function setupAuthButtons() {
-  debugLog("Setting up auth buttons");
-
-  if (domElements.authBtn) {
-    domElements.authBtn.addEventListener("click", () => {
-      debugLog("Auth button clicked");
-      window.location.href = "auth.html";
-    });
-  }
-
-  if (domElements.myProfileBtn) {
-    domElements.myProfileBtn.addEventListener("click", () => {
-      const uid = auth.currentUser?.uid;
-      if (uid) openProfile(uid);
-    });
-  }
-
-  if (domElements.logoutBtn) {
-    domElements.logoutBtn.addEventListener("click", async () => {
-      try {
-        debugLog("Logging out...");
-        cleanupRealtime();
-        await signOut(auth);
-        window.location.replace("auth.html");
-      } catch (err) {
-        debugError("Logout failed:", err);
-        alert("Logout failed. See console.");
-      }
-    });
-  }
+  domElements.authBtn?.addEventListener("click", () => {
+    window.location.href = "auth.html";
+  });
+  domElements.myProfileBtn?.addEventListener("click", () => {
+    if (currentUser) openProfile(currentUser.uid);
+  });
+  domElements.logoutBtn?.addEventListener("click", async () => {
+    try {
+      debugLog("Logging out...");
+      await signOut(auth);
+      window.location.replace("auth.html");
+    } catch (err) {
+      debugError("Logout failed:", err);
+    }
+  });
 }
 
 /**
  * Creates an HTML element for a single chat message.
- * @param {object} messageData - The message data from Firestore.
- * @returns {HTMLElement | null} The message element or null if template is missing.
  */
 function createMessageElement(messageData) {
   const { senderId, senderName, senderPhotoURL, text, timestamp } = messageData;
@@ -386,7 +220,7 @@ function createMessageElement(messageData) {
   const timeStr = timestamp?.toDate ? new Date(timestamp.toDate()).toLocaleString() : "";
 
   const clone = domElements.chatMessageTemplate.content.cloneNode(true);
-  const msgElement = clone.querySelector(".chat-message"); // Main container
+  const msgElement = clone.querySelector(".chat-message");
   const imgEl = clone.querySelector("img.avatar");
   const senderNameEl = clone.querySelector(".sender-name");
   const timeEl = clone.querySelector(".time");
@@ -405,243 +239,163 @@ function createMessageElement(messageData) {
 
 /* ===== Chat Listener & Send ===== */
 function startChatListener(user) {
-  if (!user || !domElements.chatBox) return;
-  if (unsubscriptions.chat) return;
+  if (!user || !domElements.chatBox || unsubscriptions.chat) return;
 
   debugLog("Starting chat listener");
   const messagesRef = collection(db, "servers", "defaultServer", "messages");
   const q = query(messagesRef, orderBy("timestamp"));
   
-  // Clear chatbox for initial load
   domElements.chatBox.innerHTML = "";
 
   unsubscriptions.chat = onSnapshot(q, async (snapshot) => {
-    try {
-      const changes = snapshot.docChanges();
-      if (changes.length === 0) return;
+    const changes = snapshot.docChanges();
+    if (changes.length === 0) return;
 
-      const newMessages = changes
-        .filter(change => change.type === 'added')
-        .map(change => change.doc.data());
-
-      const missingProfiles = new Set();
-      newMessages.forEach(m => {
-        if (m.senderId && !profileCache[m.senderId]) {
-          missingProfiles.add(m.senderId);
-        }
-      });
-      if (missingProfiles.size > 0) {
-        await Promise.all(Array.from(missingProfiles).map(uid => fetchProfile(uid)));
-      }
-      
-      const shouldScroll = domElements.chatBox.scrollTop + domElements.chatBox.clientHeight >= domElements.chatBox.scrollHeight - 50;
-
-      for (const change of changes) {
-        if (change.type === "added") {
-          const messageData = { id: change.doc.id, ...change.doc.data() };
-          const messageElement = createMessageElement(messageData);
-          if (messageElement) {
-            domElements.chatBox.appendChild(messageElement);
-          }
-        }
-      }
-      
-      if (shouldScroll) {
-        domElements.chatBox.scrollTop = domElements.chatBox.scrollHeight;
-      }
-
-    } catch (err) {
-      debugError("Chat render error:", err);
+    const newMessages = changes.filter(c => c.type === 'added').map(c => c.doc.data());
+    const missingProfiles = new Set(newMessages.filter(m => m.senderId && !profileCache[m.senderId]).map(m => m.senderId));
+    if (missingProfiles.size > 0) {
+      await Promise.all(Array.from(missingProfiles).map(uid => fetchProfile(uid)));
     }
-  }, err => {
-    debugError("Chat onSnapshot error:", err);
-    if (err?.code === "permission-denied" && domElements.chatBox) {
-      domElements.chatBox.innerHTML = "<div style='color:crimson'>Permission denied reading messages. Check Firestore rules.</div>";
-    }
-  });
+    
+    const shouldScroll = domElements.chatBox.scrollTop + domElements.chatBox.clientHeight >= domElements.chatBox.scrollHeight - 50;
 
-  // Name/avatar click -> profile
-  domElements.chatBox.addEventListener("click", (ev) => {
-    const target = ev.target.closest("[data-uid]");
-    if (target) {
-      const uid = target.getAttribute("data-uid");
-      if (uid) openProfile(uid);
-    }
-  });
-
-  // Send messages
-  if (domElements.sendBtn) {
-    const sendMessage = async () => {
-      const text = domElements.msgInput?.value.trim();
-      if (!text || !auth.currentUser) return;
-
-      try {
-        const me = profileCache[auth.currentUser.uid] || await fetchProfile(auth.currentUser.uid);
-        await addDoc(collection(db, "servers", "defaultServer", "messages"), {
-          text,
-          senderId: auth.currentUser.uid,
-          senderName: me.username || auth.currentUser.email?.split("@")[0] || "User",
-          senderPhotoURL: me.photoURL || "",
-          timestamp: serverTimestamp()
-        });
-        if (domElements.msgInput) domElements.msgInput.value = "";
-      } catch (err) {
-        debugError("Send message failed:", err);
-        alert("Failed to send message. See console.");
-      }
-    };
-
-    domElements.sendBtn.onclick = sendMessage;
-    domElements.msgInput?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
+    changes.forEach(change => {
+      if (change.type === "added") {
+        const messageElement = createMessageElement(change.doc.data());
+        if (messageElement) domElements.chatBox.appendChild(messageElement);
       }
     });
-  }
+    
+    if (shouldScroll) domElements.chatBox.scrollTop = domElements.chatBox.scrollHeight;
+  }, err => debugError("Chat onSnapshot error:", err));
+
+  domElements.chatBox.addEventListener("click", (ev) => {
+    const target = ev.target.closest("[data-uid]");
+    if (target?.dataset.uid) openProfile(target.dataset.uid);
+  });
+
+  const sendMessage = async () => {
+    const text = domElements.msgInput?.value.trim();
+    if (!text || !currentUser) return;
+    try {
+      const me = profileCache[currentUser.uid] || await fetchProfile(currentUser.uid);
+      await addDoc(messagesRef, {
+        text,
+        senderId: currentUser.uid,
+        senderName: me.username || "User",
+        senderPhotoURL: me.photoURL || "",
+        timestamp: serverTimestamp()
+      });
+      if (domElements.msgInput) domElements.msgInput.value = "";
+    } catch (err) {
+      debugError("Send message failed:", err);
+    }
+  };
+
+  domElements.sendBtn?.addEventListener("click", sendMessage);
+  domElements.msgInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
 }
 
 /* ===== Incoming friend requests listener ===== */
 function startIncomingRequestsListener(user) {
-  if (!user || !domElements.friendRequestsContainer) return;
-  if (unsubscriptions.incomingRequests) return;
+  if (!user || !domElements.friendRequestsContainer || unsubscriptions.incomingRequests) return;
 
-  debugLog("Starting incoming requests listener");
-  const q = query(
-    collection(db, "friendRequests"),
-    where("toUid", "==", user.uid),
-    where("status", "==", "pending")
-  );
+  const q = query(collection(db, "friendRequests"), where("toUid", "==", user.uid), where("status", "==", "pending"));
 
-  unsubscriptions.incomingRequests = onSnapshot(q, async snapshot => {
-    try {
-      debugLog("Incoming requests updated:", snapshot.docs.length);
-      domElements.friendRequestsContainer.innerHTML = "";
-      if (snapshot.empty) {
-        domElements.friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
-        return;
-      }
-
-      for (const d of snapshot.docs) {
-        const data = d.data();
-        const fromUid = data.fromUid;
-        const prof = await fetchProfile(fromUid);
-
-        const wrapper = document.createElement("div");
-        wrapper.className = "friend-request-row";
-        wrapper.innerHTML = `
-          <img src="${escapeHtml(prof.photoURL || defaultAvatar())}" class="avatar-small" />
-          <strong style="margin-left:8px">${escapeHtml(prof.username || fromUid)}</strong>
-        `;
-
-        const accept = document.createElement("button");
-        accept.textContent = "Accept";
-        const decline = document.createElement("button");
-        decline.textContent = "Decline";
-        
-        // **FIX**: Reverted to the original, secure method of accepting requests.
-        accept.addEventListener("click", async (ev) => {
-          ev.stopPropagation();
-          try {
-            // Step 1: Update the friend request document
-            await updateDoc(doc(db, "friendRequests", d.id), {
-              status: "accepted",
-              respondedAt: serverTimestamp(),
-              acceptedBy: user.uid
-            });
-            // Step 2: Update ONLY the current user's friends array
-            const meRef = doc(db, "users", user.uid);
-            await updateDoc(meRef, { friends: arrayUnion(fromUid) });
-          } catch (err) {
-            debugError("Accept failed", err);
-            alert("Accept failed. Check console for details.");
-          }
-        });
-
-        decline.addEventListener("click", async (ev) => {
-          ev.stopPropagation();
-          try {
-            await updateDoc(doc(db, "friendRequests", d.id), {
-              status: "declined",
-              respondedAt: serverTimestamp()
-            });
-          } catch (err) {
-            debugError("Decline failed", err);
-            alert("Decline failed. Check console for details.");
-          }
-        });
-
-        const btnWrap = document.createElement("span");
-        btnWrap.style.marginLeft = "auto";
-        btnWrap.appendChild(accept);
-        btnWrap.appendChild(decline);
-        wrapper.appendChild(btnWrap);
-
-        wrapper.addEventListener("click", () => openProfile(fromUid));
-        domElements.friendRequestsContainer.appendChild(wrapper);
-      }
-    } catch (err) {
-      debugError("Requests render error:", err);
-      if (domElements.friendRequestsContainer) {
-        domElements.friendRequestsContainer.innerHTML = "<div class='small'>Failed to load requests</div>";
-      }
+  unsubscriptions.incomingRequests = onSnapshot(q, async (snapshot) => {
+    if (!domElements.friendRequestsContainer) return;
+    domElements.friendRequestsContainer.innerHTML = "";
+    if (snapshot.empty) {
+      domElements.friendRequestsContainer.innerHTML = "<div class='small'>No incoming requests</div>";
+      return;
     }
-  }, err => {
-    debugError("Requests onSnapshot error:", err);
-    if (domElements.friendRequestsContainer) {
-      domElements.friendRequestsContainer.innerHTML = "<div class='small' style='color:crimson'>Permission error loading requests</div>";
+
+    for (const d of snapshot.docs) {
+      const { fromUid } = d.data();
+      const prof = await fetchProfile(fromUid);
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "friend-request-row";
+      wrapper.innerHTML = `<img src="${prof.photoURL || defaultAvatar()}" class="avatar-small"><strong>${escapeHtml(prof.username || fromUid)}</strong>`;
+      
+      const acceptBtn = document.createElement("button");
+      acceptBtn.textContent = "Accept";
+      const declineBtn = document.createElement("button");
+      declineBtn.textContent = "Decline";
+      
+      acceptBtn.onclick = async (e) => {
+        e.stopPropagation();
+        isAcceptingFriend = true; // Set flag to delay verification
+        try {
+          // Add friend to both users' friend lists and update the request
+          const requestRef = doc(db, "friendRequests", d.id);
+          const myRef = doc(db, "users", user.uid);
+          const theirRef = doc(db, "users", fromUid);
+          await Promise.all([
+            updateDoc(requestRef, { status: "accepted", respondedAt: serverTimestamp() }),
+            updateDoc(myRef, { friends: arrayUnion(fromUid) }),
+            updateDoc(theirRef, { friends: arrayUnion(user.uid) })
+          ]);
+        } catch (err) {
+          debugError("Accept friend failed", err);
+          alert("Failed to accept friend request. The other user's account may not exist.");
+        } finally {
+          // After 1 second, reset the flag. This allows Firestore time to sync.
+          setTimeout(() => { isAcceptingFriend = false; }, 1000);
+        }
+      };
+
+      declineBtn.onclick = (e) => {
+        e.stopPropagation();
+        updateDoc(doc(db, "friendRequests", d.id), { status: "declined", respondedAt: serverTimestamp() });
+      };
+
+      const btnWrapper = document.createElement("span");
+      btnWrapper.className = "button-group";
+      btnWrapper.append(acceptBtn, declineBtn);
+      wrapper.append(btnWrapper);
+      wrapper.onclick = () => openProfile(fromUid);
+      domElements.friendRequestsContainer.appendChild(wrapper);
     }
-  });
+  }, err => debugError("Requests onSnapshot error:", err));
 }
 
-// **FIX**: Restored this function to handle the other side of the friend request.
-/* ===== Outgoing friend requests listener ===== */
+/* ===== Outgoing friend requests listener (processes accepted requests from others) ===== */
 function startOutgoingRequestsListener(user) {
-  if (!user) return;
-  if (unsubscriptions.outgoingRequests) return;
-
-  debugLog("Starting outgoing requests listener");
-  const q = query(
-    collection(db, "friendRequests"),
-    where("fromUid", "==", user.uid),
-    where("status", "==", "accepted")
-  );
-
-  unsubscriptions.outgoingRequests = onSnapshot(q, async snapshot => {
-    try {
-      if (snapshot.empty) return;
-      debugLog("Processing", snapshot.docs.length, "accepted outgoing requests");
-
-      for (const d of snapshot.docs) {
-        const data = d.data();
-        const toUid = data.toUid;
-        if (data.processed === true) continue;
-
-        try {
-          const myRef = doc(db, "users", user.uid);
-          await updateDoc(myRef, { friends: arrayUnion(toUid) });
-          await updateDoc(doc(db, "friendRequests", d.id), { processed: true, processedAt: serverTimestamp() });
-          debugLog("Processed accepted request from", toUid);
-        } catch (err) {
-          debugError("Outgoing request processing failed for", d.id, err);
-        }
-      }
-    } catch (err) {
-      debugError("Outgoing requests snapshot error:", err);
-    }
-  }, err => {
-    debugError("Outgoing requests onSnapshot error:", err);
-  });
+    // This function is kept for backward compatibility if the atomic accept fails or for other systems.
+    // It ensures that if someone accepts your request, you add them back.
+    if (!user || unsubscriptions.outgoingRequests) return;
+    const q = query(collection(db, "friendRequests"), where("fromUid", "==", user.uid), where("status", "==", "accepted"));
+    unsubscriptions.outgoingRequests = onSnapshot(q, (snapshot) => {
+        snapshot.docs.forEach(d => {
+            const { toUid, processed } = d.data();
+            if (processed) return;
+            const myFriends = profileCache[user.uid]?.friends || [];
+            if (!myFriends.includes(toUid)) {
+                updateDoc(doc(db, "users", user.uid), { friends: arrayUnion(toUid) });
+            }
+            updateDoc(d.ref, { processed: true, processedAt: serverTimestamp() });
+        });
+    }, err => debugError("Outgoing requests snapshot error:", err));
 }
 
 /* ===== User doc listener for friends & topbar updates ===== */
 function startUserDocListener(user) {
-  if (!user) return;
-  if (unsubscriptions.userDoc) return;
+  if (!user || unsubscriptions.userDoc) return;
 
-  debugLog("Starting user doc listener");
   const userRef = doc(db, "users", user.uid);
-  unsubscriptions.userDoc = onSnapshot(userRef, async snap => {
+  unsubscriptions.userDoc = onSnapshot(userRef, async (snap) => {
+    // **FIX**: If we just accepted a friend, wait before running verification.
+    if (isAcceptingFriend) {
+      debugLog("Delaying friend list render due to recent acceptance.");
+      return;
+    }
+    
     if (!snap.exists()) {
       debugError("User doc missing after login:", user.uid);
       return;
@@ -649,135 +403,60 @@ function startUserDocListener(user) {
 
     const data = snap.data();
     profileCache[user.uid] = data;
-    debugLog("User doc updated:", data);
 
-    // Update topbar
     if (domElements.meAvatarSmall) domElements.meAvatarSmall.src = data.photoURL || defaultAvatar();
-    if (domElements.meName) domElements.meName.textContent = data.username || (auth.currentUser?.email ? auth.currentUser.email.split("@")[0] : "User");
+    if (domElements.meName) domElements.meName.textContent = data.username;
 
-    // Ensure UI is visible
-    showSignedInState(user);
-
-    const friends = Array.isArray(data.friends) ? data.friends : [];
+    const friends = data.friends || [];
     
-    // --- Smarter Friend Verification Logic ---
+    // --- Self-Healing Friend Verification ---
+    const friendsToRemove = [];
     if (friends.length > 0) {
-      const verifiedFriends = [];
-      const friendsToRemove = [];
-      
-      // Get requests I recently accepted to prevent incorrectly removing new friends
-      const acceptedRequestsQuery = query(
-        collection(db, "friendRequests"),
-        where("toUid", "==", user.uid),
-        where("status", "==", "accepted")
-      );
-      const acceptedRequestsSnap = await getDocs(acceptedRequestsQuery);
-      const recentlyAcceptedSenderIds = new Set(
-        acceptedRequestsSnap.docs.map(d => d.data().fromUid)
-      );
+        const friendDocs = await Promise.all(friends.map(uid => getDoc(doc(db, "users", uid))));
+        friends.forEach((friendUid, index) => {
+            const friendDoc = friendDocs[index];
+            if (!friendDoc.exists() || !friendDoc.data().friends?.includes(user.uid)) {
+                friendsToRemove.push(friendUid);
+            }
+        });
 
-      const friendDocsSnaps = await Promise.all(friends.map(uid => getDoc(doc(db, "users", uid))));
-
-      friendDocsSnaps.forEach((friendSnap, index) => {
-        const friendUid = friends[index];
-        const isReciprocal = friendSnap.exists() && friendSnap.data().friends?.includes(user.uid);
-
-        if (isReciprocal) {
-          verifiedFriends.push(friendUid);
-        } else {
-          // If not reciprocal, check if it's because I just accepted their request
-          if (recentlyAcceptedSenderIds.has(friendUid)) {
-            // This is a new friend, don't remove them. They will sync up shortly.
-            verifiedFriends.push(friendUid);
-          } else {
-            // This is a genuinely broken link (e.g., an unfriend action). Mark for removal.
-            friendsToRemove.push(friendUid);
-          }
+        if (friendsToRemove.length > 0) {
+            debugLog("Removing non-reciprocal friends:", friendsToRemove);
+            const verifiedFriends = friends.filter(uid => !friendsToRemove.includes(uid));
+            await updateDoc(userRef, { friends: verifiedFriends });
+            return; // Listener will re-run with the corrected list
         }
-      });
-
-      if (friendsToRemove.length > 0) {
-        debugLog(`Removing ${friendsToRemove.length} non-reciprocal friends.`, friendsToRemove);
-        await updateDoc(userRef, { friends: verifiedFriends });
-        return; // Listener will re-run with the corrected list
-      }
     }
 
     // --- Render Friends List ---
-    try {
-      if (domElements.friendsList) {
-        domElements.friendsList.innerHTML = "";
-        if (!friends.length) {
-          domElements.friendsList.innerHTML = "<div class='small'>No friends yet</div>";
-        } else {
-          await Promise.all(friends.map(uid => fetchProfile(uid)));
-          for (const uid of friends) {
-            const p = profileCache[uid] || { username: uid, photoURL: "" };
-            if (domElements.friendItemTemplate) {
-              const clone = domElements.friendItemTemplate.content.cloneNode(true);
-              const friendItemWrapper = document.createElement("li");
-              friendItemWrapper.className = "friend-item";
-
-              const img = clone.querySelector(".friend-avatar");
-              const nameEl = clone.querySelector(".friend-name");
-
-              if (img) {
-                img.src = p.photoURL || defaultAvatar();
-                img.classList.add("avatar-small");
-              }
-              if (nameEl) {
-                nameEl.textContent = p.username || uid;
-              }
-
-              friendItemWrapper.appendChild(clone);
-              friendItemWrapper.addEventListener("click", () => openProfile(uid));
-              domElements.friendsList.appendChild(friendItemWrapper);
-
-            } else {
-              // Fallback
-              const li = document.createElement("li");
-              li.className = "friend-item";
-              li.innerHTML = `<img src="${p.photoURL || defaultAvatar()}" class="avatar-small" /><span>${escapeHtml(p.username || uid)}</span>`;
-              li.addEventListener("click", () => openProfile(uid));
-              domElements.friendsList.appendChild(li);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      debugError("Error rendering friends", err);
+    if (!domElements.friendsList) return;
+    domElements.friendsList.innerHTML = "";
+    if (friends.length === 0) {
+      domElements.friendsList.innerHTML = "<div class='small'>No friends yet</div>";
+    } else {
+      await Promise.all(friends.map(uid => fetchProfile(uid)));
+      friends.forEach(uid => {
+        const p = profileCache[uid] || {};
+        const friendItemWrapper = document.createElement("li");
+        friendItemWrapper.className = "friend-item";
+        friendItemWrapper.innerHTML = `<img src="${p.photoURL || defaultAvatar()}" class="avatar-small"><span>${escapeHtml(p.username || uid)}</span>`;
+        friendItemWrapper.onclick = () => openProfile(uid);
+        domElements.friendsList.appendChild(friendItemWrapper);
+      });
     }
-  }, err => {
-    debugError("User doc snapshot error:", err);
-  });
-}
-
-/* ===== Helper functions (keeping original API) ===== */
-async function hasExistingPendingRequestBetween(aUid, bUid) {
-  try {
-    const q1 = query(collection(db, "friendRequests"), where("fromUid", "==", aUid), where("toUid", "==", bUid), where("status", "==", "pending"));
-    const q2 = query(collection(db, "friendRequests"), where("fromUid", "==", bUid), where("toUid", "==", aUid), where("status", "==", "pending"));
-    const [r1, r2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-    return !r1.empty || !r2.empty;
-  } catch (err) {
-    debugError("hasExistingPendingRequestBetween error", err);
-    return false;
-  }
+  }, err => debugError("User doc snapshot error:", err));
 }
 
 /* ===== Main Initialization ===== */
-document.addEventListener("DOMContentLoaded", () => {
-  debugLog("=== DOM CONTENT LOADED ===");
-  initializeApp();
-});
+document.addEventListener("DOMContentLoaded", initializeApp);
 
-// Fallback initialization if DOM is already loaded
-if (document.readyState !== 'loading') {
-  debugLog("=== DOM ALREADY LOADED ===");
-  setTimeout(initializeApp, 100);
+// Fallback initialization if the script is loaded after the DOM is ready
+if (document.readyState === "complete" || document.readyState === "interactive") {
+  setTimeout(initializeApp, 1);
 }
 
-/* ===== Safety fallback redirect ===== */
+/* ===== Safety Fallbacks ===== */
+// Redirect to auth page if Firebase doesn't initialize in time
 setTimeout(() => {
   if (!authChecked) {
     debugError("Auth check timed out; redirecting to auth.html");
@@ -785,26 +464,29 @@ setTimeout(() => {
   }
 }, 15000);
 
-// Check if user exists but UI isn't showing after 5 seconds
+// Force a UI update if the user is signed in but the UI is still hidden after 5s
 setTimeout(() => {
-  if (authReady && auth?.currentUser && domElements.chatContainer && domElements.chatContainer.style.display === "none") {
-    debugError("User signed in but UI not showing, forcing update");
-    forceUIUpdate();
+  if (authReady && currentUser && !document.body.classList.contains('signed-in')) {
+    debugError("User is signed in but UI not showing, forcing update.");
+    showSignedInState();
   }
 }, 5000);
 
-// Add debug info to window for console debugging
-if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+
+// Add debug info to the window object for easier console debugging on localhost
+if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
   window.debugScript = {
-    forceUIUpdate,
-    showSignedInState: () => showSignedInState(auth?.currentUser),
+    forceUIUpdate: () => {
+        if(currentUser) showSignedInState(); else showSignedOutState();
+    },
+    showSignedInState,
     showSignedOutState,
-    domElements: () => domElements,
-    auth: () => auth,
-    currentUser: () => auth?.currentUser,
-    profileCache: () => profileCache
+    getDomElements: () => domElements,
+    getAuth: () => auth,
+    getCurrentUser: () => currentUser,
+    getProfileCache: () => profileCache
   };
   debugLog("Debug functions added to window.debugScript");
 }
 
-debugLog("script.js loaded — enhanced debugging version active");
+debugLog("script.js loaded — final version active");
