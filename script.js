@@ -424,7 +424,9 @@ function createMessageElement(messageData) {
   const timeStr = timestamp?.toDate ? new Date(timestamp.toDate()).toLocaleString() : "";
 
   const clone = domElements.chatMessageTemplate.content.cloneNode(true);
-  const msgElement = clone.querySelector(".chat-message");
+  const msgElement = 
+clone.querySelector('.chat-message').setAttribute('data-message-id', m.id);
+clone.querySelector(".chat-message");
   const imgEl = clone.querySelector("img.avatar");
   const senderNameEl = clone.querySelector(".sender-name");
   const timeEl = clone.querySelector(".time");
