@@ -1,4 +1,4 @@
-// script.js — Complete fixed version with friend request accept fix and cross-tab communication
+// script.js — FINAL COMPLETE VERSION (Fully compatible with tags.js)
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import {
@@ -414,8 +414,10 @@ function setupAuthButtons() {
   }
 }
 
+// THIS HELPER FUNCTION IS THE KEY. IT CREATES THE MESSAGE ELEMENT.
 function createMessageElement(messageData) {
-  const { senderId, senderName, senderPhotoURL, text, timestamp } = messageData;
+  // messageData includes the message 'id' now
+  const { id, senderId, senderName, senderPhotoURL, text, timestamp } = messageData;
   if (!domElements.chatMessageTemplate) return null;
 
   const profile = profileCache[senderId] || { username: senderName, photoURL: senderPhotoURL };
@@ -423,21 +425,33 @@ function createMessageElement(messageData) {
   const avatar = profile.photoURL || defaultAvatar();
   const timeStr = timestamp?.toDate ? new Date(timestamp.toDate()).toLocaleString() : "";
 
-const clone = domElements.chatMessageTemplate.content.cloneNode(true);
+  const clone = domElements.chatMessageTemplate.content.cloneNode(true);
+  const msgElement = clone.querySelector(".chat-message");
+  const imgEl = clone.querySelector("img.avatar");
+  const senderNameEl = clone.querySelector(".sender-name");
+  const timeEl = clone.querySelector(".time");
+  const textEl = clone.querySelector(".message-text");
 
-// CORRECT: Just call the function to add the attribute.
-clone.querySelector('.chat-message').setAttribute('data-message-id', m.id);
+  // THIS IS THE FIX: We add BOTH data-uid and data-message-id here.
+  if (msgElement) {
+    // This is for clicking on the user profile
+    msgElement.setAttribute("data-uid", senderId || ""); 
+    // This is for the admin delete button in tags.js
+    msgElement.setAttribute("data-message-id", id);
+  }
 
-// Use the original variable names from the script.
-const img = clone.querySelector("img.avatar");
-const senderNameEl = clone.querySelector(".sender-name");
-const timeEl = clone.querySelector(".time");
-const textEl = clone.querySelector(".message-text");
+  if (senderNameEl) {
+    // Also add data-uid to the name for profile clicking
+    senderNameEl.setAttribute("data-uid", senderId || "");
+    senderNameEl.textContent = name;
+  }
 
-
-  if (msgElement) msgElement.setAttribute("data-uid", senderId || "");
-  if (imgEl) imgEl.src = avatar;
-  if (senderNameEl) senderNameEl.textContent = name;
+  if (imgEl) {
+    // Also add data-uid to the avatar for profile clicking
+    imgEl.setAttribute("data-uid", senderId || "");
+    imgEl.src = avatar;
+  }
+  
   if (timeEl) timeEl.textContent = timeStr;
   if (textEl) textEl.innerHTML = escapeHtml(text || "");
 
@@ -462,12 +476,12 @@ function startChatListener(user) {
       const changes = snapshot.docChanges();
       if (changes.length === 0) return;
 
-      const newMessages = changes
+      const newMessagesData = changes
         .filter(change => change.type === 'added')
-        .map(change => change.doc.data());
+        .map(change => ({ id: change.doc.id, ...change.doc.data() }));
 
       const missingProfiles = new Set();
-      newMessages.forEach(m => {
+      newMessagesData.forEach(m => {
         if (m.senderId && !profileCache[m.senderId]) {
           missingProfiles.add(m.senderId);
         }
@@ -478,13 +492,10 @@ function startChatListener(user) {
 
       const shouldScroll = domElements.chatBox.scrollTop + domElements.chatBox.clientHeight >= domElements.chatBox.scrollHeight - 50;
 
-      for (const change of changes) {
-        if (change.type === "added") {
-          const messageData = { id: change.doc.id, ...change.doc.data() };
-          const messageElement = createMessageElement(messageData);
-          if (messageElement) {
-            domElements.chatBox.appendChild(messageElement);
-          }
+      for (const messageData of newMessagesData) {
+        const messageElement = createMessageElement(messageData);
+        if (messageElement) {
+          domElements.chatBox.appendChild(messageElement);
         }
       }
 
@@ -570,71 +581,47 @@ function startIncomingRequestsListener(user) {
         const wrapper = document.createElement("div");
         wrapper.className = "friend-request-row";
         wrapper.innerHTML = `
-          <img src="${escapeHtml(prof.photoURL || defaultAvatar())}" class="avatar-small" />
-          <strong style="margin-left:8px">${escapeHtml(prof.username || fromUid)}</strong>
+          <div class="friend-request-info">
+            <img src="${escapeHtml(prof.photoURL || defaultAvatar())}" class="avatar-small" />
+            <strong>${escapeHtml(prof.username || fromUid)}</strong>
+          </div>
         `;
 
         const accept = document.createElement("button");
         accept.textContent = "Accept";
         const decline = document.createElement("button");
         decline.textContent = "Decline";
+        decline.className = "secondary";
 
-        // Enhanced accept handler with better error handling
         accept.addEventListener("click", async (ev) => {
           ev.stopPropagation();
-          
           accept.disabled = true;
           accept.textContent = "Accepting...";
           
           try {
-            debugLog(`Attempting to accept friend request from ${fromUid}`);
-            
             const requestRef = doc(db, "friendRequests", d.id);
             await updateDoc(requestRef, {
               status: "accepted",
               respondedAt: serverTimestamp(),
               acceptedBy: user.uid
             });
-            debugLog("Friend request marked as accepted");
-            
+
             const meRef = doc(db, "users", user.uid);
-            
-            const currentUserSnap = await getDoc(meRef);
-            if (!currentUserSnap.exists()) {
-              throw new Error("Current user document not found");
-            }
-            
-            const currentUserData = currentUserSnap.data();
-            const currentFriends = Array.isArray(currentUserData.friends) ? currentUserData.friends : [];
-            
-            if (!currentFriends.includes(fromUid)) {
-              await updateDoc(meRef, { 
-                friends: arrayUnion(fromUid),
-                updatedAt: serverTimestamp()
-              });
-              debugLog(`Added ${fromUid} to current user's friends list`);
-            } else {
-              debugLog(`${fromUid} already in friends list, skipping add`);
-            }
-            
+            await updateDoc(meRef, { 
+              friends: arrayUnion(fromUid),
+              updatedAt: serverTimestamp()
+            });
+
+            const friendRef = doc(db, "users", fromUid);
+            await updateDoc(friendRef, {
+              friends: arrayUnion(user.uid),
+              updatedAt: serverTimestamp()
+            });
+
             debugLog("Friend request accepted successfully");
-            
           } catch (err) {
             debugError("Accept friend request failed:", err);
-            
-            let errorMessage = "Accept failed: ";
-            if (err.code === 'permission-denied') {
-              errorMessage += "Permission denied. Check Firestore rules.";
-            } else if (err.code === 'not-found') {
-              errorMessage += "Friend request or user not found.";
-            } else if (err.code === 'network-request-failed') {
-              errorMessage += "Network error. Check your connection.";
-            } else {
-              errorMessage += err.message || "Unknown error occurred.";
-            }
-            
-            alert(errorMessage);
-            
+            alert("Accept failed: " + err.message);
             accept.disabled = false;
             accept.textContent = "Accept";
           }
@@ -653,8 +640,8 @@ function startIncomingRequestsListener(user) {
           }
         });
 
-        const btnWrap = document.createElement("span");
-        btnWrap.style.marginLeft = "auto";
+        const btnWrap = document.createElement("div");
+        btnWrap.className = "friend-request-actions";
         btnWrap.appendChild(accept);
         btnWrap.appendChild(decline);
         wrapper.appendChild(btnWrap);
@@ -680,39 +667,9 @@ function startIncomingRequestsListener(user) {
 function startOutgoingRequestsListener(user) {
   if (!user) return;
   if (unsubscriptions.outgoingRequests) return;
-
-  debugLog("Starting outgoing requests listener");
-  const q = query(
-    collection(db, "friendRequests"),
-    where("fromUid", "==", user.uid),
-    where("status", "==", "accepted")
-  );
-
-  unsubscriptions.outgoingRequests = onSnapshot(q, async snapshot => {
-    try {
-      if (snapshot.empty) return;
-      debugLog("Processing", snapshot.docs.length, "accepted outgoing requests");
-
-      for (const d of snapshot.docs) {
-        const data = d.data();
-        const toUid = data.toUid;
-        if (data.processed === true) continue;
-
-        try {
-          const myRef = doc(db, "users", user.uid);
-          await updateDoc(myRef, { friends: arrayUnion(toUid) });
-          await updateDoc(doc(db, "friendRequests", d.id), { processed: true, processedAt: serverTimestamp() });
-          debugLog("Processed accepted request from", toUid);
-        } catch (err) {
-          debugError("Outgoing request processing failed for", d.id, err);
-        }
-      }
-    } catch (err) {
-      debugError("Outgoing requests snapshot error:", err);
-    }
-  }, err => {
-    debugError("Outgoing requests onSnapshot error:", err);
-  });
+  // This listener is a no-op now since both users add each other on accept.
+  // Kept for potential future logic.
+  return;
 }
 
 /* ===== User doc listener for friends & topbar updates ===== */
@@ -739,44 +696,6 @@ function startUserDocListener(user) {
 
     const friends = Array.isArray(data.friends) ? data.friends : [];
 
-    if (friends.length > 0) {
-      const verifiedFriends = [];
-      const friendsToRemove = [];
-
-      const acceptedRequestsQuery = query(
-        collection(db, "friendRequests"),
-        where("toUid", "==", user.uid),
-        where("status", "==", "accepted")
-      );
-      const acceptedRequestsSnap = await getDocs(acceptedRequestsQuery);
-      const recentlyAcceptedSenderIds = new Set(
-        acceptedRequestsSnap.docs.map(d => d.data().fromUid)
-      );
-
-      const friendDocsSnaps = await Promise.all(friends.map(uid => getDoc(doc(db, "users", uid))));
-
-      friendDocsSnaps.forEach((friendSnap, index) => {
-        const friendUid = friends[index];
-        const isReciprocal = friendSnap.exists() && friendSnap.data().friends?.includes(user.uid);
-
-        if (isReciprocal) {
-          verifiedFriends.push(friendUid);
-        } else {
-          if (recentlyAcceptedSenderIds.has(friendUid)) {
-            verifiedFriends.push(friendUid);
-          } else {
-            friendsToRemove.push(friendUid);
-          }
-        }
-      });
-
-      if (friendsToRemove.length > 0) {
-        debugLog(`Removing ${friendsToRemove.length} non-reciprocal friends.`, friendsToRemove);
-        await updateDoc(userRef, { friends: verifiedFriends });
-        return;
-      }
-    }
-
     try {
       if (domElements.friendsList) {
         domElements.friendsList.innerHTML = "";
@@ -789,49 +708,27 @@ function startUserDocListener(user) {
             
             if (domElements.friendItemTemplate) {
               const clone = domElements.friendItemTemplate.content.cloneNode(true);
-              const friendItemWrapper = document.createElement("li");
-              friendItemWrapper.className = "friend-item";
-              friendItemWrapper.setAttribute("data-friend-uid", uid);
-
-              const img = clone.querySelector(".friend-avatar");
-              const nameEl = clone.querySelector(".friend-name");
-
-              if (img) {
-                img.src = p.photoURL || defaultAvatar();
-                img.className = "friend-avatar avatar-small";
-                img.style.cssText = "width: 32px; height: 32px; border-radius: 50%; object-fit: cover; margin-right: 8px;";
-                img.onerror = function() { this.src = defaultAvatar(); };
+              const friendItemWrapper = clone.querySelector('.friend-item');
+              
+              if (friendItemWrapper) {
+                friendItemWrapper.setAttribute("data-friend-uid", uid);
+  
+                const img = friendItemWrapper.querySelector(".friend-avatar");
+                const nameEl = friendItemWrapper.querySelector(".friend-name");
+  
+                if (img) {
+                  img.src = p.photoURL || defaultAvatar();
+                  img.onerror = function() { this.src = defaultAvatar(); };
+                }
+                
+                if (nameEl) {
+                  nameEl.textContent = p.username || uid;
+                }
+  
+                friendItemWrapper.addEventListener("click", () => openProfile(uid));
+                domElements.friendsList.appendChild(friendItemWrapper);
               }
-              
-              if (nameEl) {
-                nameEl.textContent = p.username || uid;
-                nameEl.style.cssText = "flex: 1; font-weight: 500;";
-              }
 
-              friendItemWrapper.appendChild(clone);
-              friendItemWrapper.addEventListener("click", () => openProfile(uid));
-              domElements.friendsList.appendChild(friendItemWrapper);
-
-            } else {
-              const li = document.createElement("li");
-              li.className = "friend-item";
-              li.setAttribute("data-friend-uid", uid);
-              li.style.cssText = "display: flex; align-items: center; padding: 8px; cursor: pointer; border: 1px solid #ddd; margin: 4px; border-radius: 4px;";
-              
-              const img = document.createElement("img");
-              img.src = p.photoURL || defaultAvatar();
-              img.className = "avatar-small";
-              img.style.cssText = "width: 32px; height: 32px; border-radius: 50%; object-fit: cover; margin-right: 8px;";
-              img.onerror = function() { this.src = defaultAvatar(); };
-              
-              const span = document.createElement("span");
-              span.textContent = p.username || uid;
-              span.style.cssText = "flex: 1; font-weight: 500;";
-              
-              li.appendChild(img);
-              li.appendChild(span);
-              li.addEventListener("click", () => openProfile(uid));
-              domElements.friendsList.appendChild(li);
             }
           }
         }
@@ -848,19 +745,6 @@ function startUserDocListener(user) {
       domElements.friendsList.innerHTML = "<div class='small' style='color:crimson'>Permission denied reading user data</div>";
     }
   });
-}
-
-/* ===== Helper functions ===== */
-async function hasExistingPendingRequestBetween(aUid, bUid) {
-  try {
-    const q1 = query(collection(db, "friendRequests"), where("fromUid", "==", aUid), where("toUid", "==", bUid), where("status", "==", "pending"));
-    const q2 = query(collection(db, "friendRequests"), where("fromUid", "==", bUid), where("toUid", "==", aUid), where("status", "==", "pending"));
-    const [r1, r2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-    return !r1.empty || !r2.empty;
-  } catch (err) {
-    debugError("hasExistingPendingRequestBetween error", err);
-    return false;
-  }
 }
 
 /* ===== Main Initialization ===== */
@@ -902,4 +786,4 @@ if (window.location.hostname === 'localhost' || window.location.hostname === '12
   debugLog("Debug functions added to window.debugScript");
 }
 
-debugLog("script.js loaded — enhanced debugging version active");
+debugLog("script.js loaded — FINAL COMPLETE VERSION");
