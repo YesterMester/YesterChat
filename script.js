@@ -423,14 +423,17 @@ function createMessageElement(messageData) {
   const avatar = profile.photoURL || defaultAvatar();
   const timeStr = timestamp?.toDate ? new Date(timestamp.toDate()).toLocaleString() : "";
 
-  const clone = domElements.chatMessageTemplate.content.cloneNode(true);
-  const msgElement = 
+const clone = domElements.chatMessageTemplate.content.cloneNode(true);
+
+// CORRECT: Just call the function to add the attribute.
 clone.querySelector('.chat-message').setAttribute('data-message-id', m.id);
-clone.querySelector(".chat-message");
-  const imgEl = clone.querySelector("img.avatar");
-  const senderNameEl = clone.querySelector(".sender-name");
-  const timeEl = clone.querySelector(".time");
-  const textEl = clone.querySelector(".message-text");
+
+// Use the original variable names from the script.
+const img = clone.querySelector("img.avatar");
+const senderNameEl = clone.querySelector(".sender-name");
+const timeEl = clone.querySelector(".time");
+const textEl = clone.querySelector(".message-text");
+
 
   if (msgElement) msgElement.setAttribute("data-uid", senderId || "");
   if (imgEl) imgEl.src = avatar;
